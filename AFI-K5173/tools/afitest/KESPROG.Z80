@@ -1,0 +1,129 @@
+; Copyright (c) 2022, Stefan Berndt
+;
+; All rights reserved.
+;
+; Redistribution and use in source and binary forms, with or without 
+; modification, are permitted provided that the following conditions are met:
+; 1. Redistributions of source code must retain the above copyright notice, 
+;    this list of conditions and the following disclaimer.
+; 2. Redistributions in binary form must reproduce the above copyright notice, 
+;    this list of conditions and the following disclaimer in the documentation 
+;    and/or other materials provided with the distribution.
+;
+; THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" 
+; AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE 
+; IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE 
+; ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE 
+; LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR 
+; CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF 
+; SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS 
+; INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN 
+; CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) 
+; ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF 
+; THE POSSIBILITY OF SUCH DAMAGE.
+
+        org 	$2100
+
+pbase   equ     $3800   ; der RAM-Bereich $3800-$39FF sieht unbenutzt aus
+
+; ********* Installer **********
+
+        ld      hl,fn
+        ld      de,pbase
+        ld      bc,fe-fn
+        ldir            ; kopiert die Serviceroutine in den freien RAM
+        ld      hl,pbase
+        ld      ($3b7d),hl  ; installiert die Serviceroutine als Kanal B Programm
+        ret
+
+; ********** Serviceroutine ***********
+
+fn:     ld      hl,($c4a7)  ; Zugriff auf den Hauptspeicher des 8086 Systems:  004A:0007+8 (Parameter: Addresse)
+        ld      a,($c4a6)   ; 004A:0006 (Parameter: Kommando)
+        cp      1           ; Kommando: Memory read
+        jr      nz,l1
+        ld      a,(hl)    
+        ld      ($c4a9),a   ; 004A:0009 (Ergebnis: Wert)
+        jr      l6
+l1:     cp      2           ; Kommando: Memory write
+        jr      nz,l2
+        ld      a,($c4a9)   ; 004A:0009 (Parameter: Wert)
+        ld      (hl),a
+        jr      l6
+l2:     cp      3           ; Kommando: IO read
+        jr      nz,l3
+        ld      c,l
+        in      a,(c)
+        ld      ($c4a9),a   ; 004A:0009 (Ergebnis: Wert)
+        jr      l6
+l3:     cp      4           ; Kommando IO write
+        jr      nz,l9
+        ld      a,($c4a9)   ; 004A:0009 (Parameter: Wert)
+        ld      c,l
+        out     (c),a
+
+l6:     xor	    a,a
+        ld      ($c4a6),a   ; Kommando loeschen signalisiert dass der Befehl fertig ist
+        scf
+        ret
+
+l9:     cp      5           ; Kommando: Block Read (CPU)
+        jr      nz,l10
+        ld      a,($c4a9)   ; 004A:0009 (Parameter: PORT)
+        ld      c,a
+        ld      b,0
+        inir
+        inir
+        jr      l6
+l10:    cp      6           ; Kommando: Block Write (CPU)
+        jr      nz,l11
+        ld      a,($c4a9)   ; 004A:0009 (Parameter: PORT)
+        ld      c,a
+        ld      b,0
+        otir
+        otir
+        jr      l6
+l11:    cp      7           ; Kommando: Block Read (DMA)
+        jr      nz,l12
+        ld      a,$01                     ; Richtung: B-->A
+l13:    ld      (pbase+(ddir-fn)),a       ; direkt in die DMA-Parameter speichern
+        ld      (pbase+(dmem-fn)),hl      ; Speicheraddresse auch
+        ld      a,($c4a9)                 ; 004A:0009 (Parameter: PORT)
+        ld      (pbase+(dport-fn)),a      ; und PORT
+        ld	    c,0                       ; DMA-Controller Port
+        ld	    hl,pbase-(dma-fn)         ; Addresse DMA-Paramter
+        ld      b,fe-dma                  ; Anzahl DMA-Parameter
+        otir
+        nop                 ; Hier laeuft der DMA-Transfer
+        nop
+        jr      l6
+l12:    cp      8           ; Kommando: Block Write (DMA)
+        jr      nz,l14
+        ld      a,$05       ; Richtung: A-->B
+        jr      l13         ; der Rest ist wie bei Block Read
+l14:    jr      l6        
+
+
+;  ******** Z80-DMA Parameter **********
+
+dma:    db      $C3     ; Reset
+        db      $79     ; Transfer B-->A
+dmem:   dw      $2100   ; Port A Addresse
+        dw      $200    ; Block Laenge
+        db      $54     ; Port A Memory, Increasing
+        db      $4E     ; Port A: 2 Cycle, voll IORQ, voll MREQ, voll RD, halb WR
+        db      $68     ; Port B IO, Fixed
+        db      $4E     ; Port B: 2 Cycle, voll IORQ, voll MREQ, voll RD, halb WR
+        db      $80     ; no INT, no STOP
+        db      $BD     ; Conti Mode
+dport:  db      $B0     ; Port Low
+        db      $00     ; Port High
+        db      $12     ; Interrupt am Ende
+        db      $10     ; Interropt Vektor
+        db      $82     ; READY active High
+        db      $CF     ; Load Command
+ddir:   db      $01     ; Transfer direction
+        db      $CF     ; Load
+        db      $87     ; Start DMA
+
+fe:

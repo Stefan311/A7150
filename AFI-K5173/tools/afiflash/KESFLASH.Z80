@@ -1,0 +1,26 @@
+    org     $2100
+    ld      hl,fn       ;   Kommando-Handler
+    ld      de,$3e80    ;   in einen unbenutzten RAM-Bereich
+    ld      bc,fe-fn
+    ldir                ;   kopieren
+    ld      hl,$3e80    ;   und als Interruptvector
+    ld      ($3b7d),hl  ;   installieren
+    ret
+
+fn:                     ;   Kommando-Handler KES Kanal B
+    ld      a,($c4a9)   ;   HOST-Speicher Addr 004A:0009 (Flash-Segment)
+    out     ($b2),a     ;   an Flash-Segment-Port
+    ld      hl,($c4a7)  ;   HOST-Speicher Addr 004A:0007+8 (Flash-Addresse)
+    ld      a,($c4a6)   ;   HOST-Speicher Addr 004A:0006 (Kommandobyte)
+    cp      1           ;   Schreib-Kommando?
+    jr      nz,fr       ;   alles andere wird als Lesekommando gewertet
+    ld      a,($c4aa)   ;   HOST-Speicher Addr 004A:000a (Datenbyte)
+    ld      (hl),a      ;   Flash schreiben
+exit: xor     a
+    ld      ($c4a6),a   ;   Kommando auf 0 setzen, ist Fertig-Meldung
+    scf                 ;   Kein Interrupt im Host-System
+    ret
+fr: ld      a,(hl)      ;   Flash lesen
+    ld      ($c4aa),a   ;   HOST-Speicher Addr 004A:000a (Datenbyte)
+    jr      exit
+fe:
