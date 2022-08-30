@@ -12,9 +12,9 @@ PCB Layout: *fertig*
 PCB Prototyp: *bestellt*
 Firmware: *noch nicht begonnen*
 Tools:
-+Memorydump (KESDump): *fertig*
-+Firmware-Tool (AFIFlash): *fertig*
-+Hardware-Test (AFITest): *fertig*
-+Diskinfo-Tool (AFIInfo): *noch nicht begonnen*
-+SMART-Info (AFISmart): *noch nicht begonnen*
-+Z80-Programm-Tool (BIN2INC): *fertig*
++ Memorydump (KESDump): *fertig*
++ Firmware-Tool (AFIFlash): *fertig*
++ Hardware-Test (AFITest): *fertig*
++ Diskinfo-Tool (AFIInfo): *noch nicht begonnen*
++ SMART-Info (AFISmart): *noch nicht begonnen*
++ Z80-Programm-Tool (BIN2INC): *fertig*
