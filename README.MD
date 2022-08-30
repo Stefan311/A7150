@@ -4,4 +4,4 @@ It's an old computer from the east german "Robotron" company. See [Wikipedia](ht
 ### Why is the rest of this project in german language?
 It's made for and with an german audience in mind. The A7150 is rare outside the former east german country anyway.
 ### Projekte
-(AFI-K5173/README.MD) IDE-Kontroller
+[IDE-Kontroller AFI-K5173](https://github.com/Stefan311/A7150/AFI-K5173/README.MD)
