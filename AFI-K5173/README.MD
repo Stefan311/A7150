@@ -6,11 +6,17 @@ AFI ist einen Platine, mit dem IDE-Festplatten an das Datenträger-Subsystem des
 * Boot-Fähig
 * Firmware Flashrom im System beschreibbar
 ### Wie ist der Projektstatus?
+
 Schaltungsentwurf: *fertig*
+
 Test auf Steckbrett: *fertig*
+
 PCB Layout: *fertig*
+
 PCB Prototyp: *bestellt*
+
 Firmware: *noch nicht begonnen*
+
 Tools:
 + Memorydump (KESDump): *fertig*
 + Firmware-Tool (AFIFlash): *fertig*
