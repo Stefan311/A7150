@@ -3,7 +3,11 @@
 tpc bin2inc.pas
 @if not exist bin2inc.exe goto error
 @cd ..
-@path=%path%;c:\bin2inc\;
+@cd crctool
+tpc crctool.pas
+@if not exist crctool.exe goto error
+@cd ..
+@path=%path%;c:\bin2inc\;c:\crctool\;
 cd kesdump
 @call build.bat
 @if not exist kesdump.exe goto error

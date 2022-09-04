@@ -13,14 +13,15 @@ Test auf Steckbrett: *fertig*
 
 PCB Layout: *fertig*
 
-PCB Prototyp: *bestellt*
+PCB Prototyp: *beim Zoll*
 
-Firmware: *noch nicht begonnen*
+Firmware: *begonnen*
 
-Tools:
+[Tools:](tools/)
 + Memorydump (KESDump): *fertig*
 + Firmware-Tool (AFIFlash): *fertig*
 + Hardware-Test (AFITest): *fertig*
 + Diskinfo-Tool (AFIInfo): *noch nicht begonnen*
 + SMART-Info (AFISmart): *noch nicht begonnen*
 + Z80-Programm-Tool (BIN2INC): *fertig*
++ CRC-Generator (CRCTOOL): *fertig*
