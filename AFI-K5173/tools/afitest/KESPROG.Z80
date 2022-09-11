@@ -91,7 +91,7 @@ l13:    ld      (pbase+(ddir-fn)),a       ; direkt in die DMA-Parameter speicher
         ld      a,($c4a9)                 ; 004A:0009 (Parameter: PORT)
         ld      (pbase+(dport-fn)),a      ; und PORT
         ld	    c,0                       ; DMA-Controller Port
-        ld	    hl,pbase-(dma-fn)         ; Addresse DMA-Paramter
+        ld      hl,pbase+(dma-fn)         ; Addresse DMA-Paramter
         ld      b,fe-dma                  ; Anzahl DMA-Parameter
         otir
         nop                 ; Hier laeuft der DMA-Transfer

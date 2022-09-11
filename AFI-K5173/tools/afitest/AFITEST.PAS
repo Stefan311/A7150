@@ -276,6 +276,7 @@ begin
     write('>');
     readln(s);
     s:=upper(s);
+    ok:=true;
     case s[1] of
       'S': writeln('Status:'+BTH(IDEIn(7)));
       'A': begin
@@ -314,8 +315,8 @@ begin
                begin
                  if length(s)>3 then
                    begin
-                     assign(f,copy(s,4,length(s)-4));
-                     reset(f);
+                     assign(f,copy(s,5,length(s)-4));
+                     reset(f,1);
                      blockread(f,kes_data[0],512);
                      close(f);
                    end
@@ -342,6 +343,7 @@ begin
              if t='BWD' then Mem[$4A:6]:=8;
              if Mem[$4A:6]=0 then continue;
              Memw[$4A:7]:=$2100;
+             Mem[$4A:9]:=$B0;
              Port[$4B]:=1;
              repeat until Mem[$4A:6]=0;
              Kes_Buffer_Transfer(false, 512);
@@ -349,7 +351,7 @@ begin
                begin
                  if length(s)>3 then
                    begin
-                     assign(f,copy(s,4,length(s)-4));
+                     assign(f,copy(s,5,length(s)-4));
                      rewrite(f,1);
                      blockwrite(f,kes_data[0],512);
                      close(f);
@@ -405,3 +407,4 @@ begin
   until cmd=100;
 end.
 
+
