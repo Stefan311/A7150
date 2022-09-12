@@ -1,26 +1,66 @@
-    org     $2100
-    ld      hl,fn       ;   Kommando-Handler
-    ld      de,$3e80    ;   in einen unbenutzten RAM-Bereich
-    ld      bc,fe-fn
-    ldir                ;   kopieren
-    ld      hl,$3e80    ;   und als Interruptvector
-    ld      ($3b7d),hl  ;   installieren
-    ret
+        org     $2100
+        ld      hl,$0543    ;   AFI-Funktionen deaktivieren, die koennen sonst die autodetection stoeren
+        ld      ($3b80),hl
+        ld      ($3b83),hl
+        ld      hl,$1000    ;   Original MFM-Firmware
+        ld      ($3b6b),hl
+        ld      hl,$1003
+        ld      ($3b6e),hl
+        ld      hl,$1006
+        ld      ($3b71),hl
+        ld      hl,$4000    ;   Original Floppy-Firmware
+        ld      ($3b74),hl
+        ld      hl,$4003
+        ld      ($3b77),hl
+        ld      hl,$4006
+        ld      ($3b7a),hl
 
-fn:                     ;   Kommando-Handler KES Kanal B
-    ld      a,($c4a9)   ;   HOST-Speicher Addr 004A:0009 (Flash-Segment)
-    out     ($b2),a     ;   an Flash-Segment-Port
-    ld      hl,($c4a7)  ;   HOST-Speicher Addr 004A:0007+8 (Flash-Addresse)
-    ld      a,($c4a6)   ;   HOST-Speicher Addr 004A:0006 (Kommandobyte)
-    cp      1           ;   Schreib-Kommando?
-    jr      nz,fr       ;   alles andere wird als Lesekommando gewertet
-    ld      a,($c4aa)   ;   HOST-Speicher Addr 004A:000a (Datenbyte)
-    ld      (hl),a      ;   Flash schreiben
-exit: xor     a
-    ld      ($c4a6),a   ;   Kommando auf 0 setzen, ist Fertig-Meldung
-    scf                 ;   Kein Interrupt im Host-System
-    ret
-fr: ld      a,(hl)      ;   Flash lesen
-    ld      ($c4aa),a   ;   HOST-Speicher Addr 004A:000a (Datenbyte)
-    jr      exit
+        ld      hl,fn       ;   Kommando-Handler
+        ld      de,$3e80    ;   in einen unbenutzten RAM-Bereich
+        ld      bc,fe-fn
+        ldir                ;   kopieren
+        ld      hl,$3e80    ;   und als Interruptvector
+        ld      ($3b7d),hl  ;   installieren
+        ret
+
+fn:                         ;   Kommando-Handler KES Kanal B
+        ld      a,($c4a9)   ;   HOST-Speicher Addr 004A:0009 (Flash-Segment)
+        out     ($b2),a     ;   an Flash-Segment-Port
+        ld      hl,($c4a7)  ;   HOST-Speicher Addr 004A:0007+8 (Flash-Addresse)
+        ld      a,($c4a6)   ;   HOST-Speicher Addr 004A:0006 (Kommandobyte)
+        cp      a,1         ;   Schreib-Kommando?
+        jr      nz,fx1
+        ld      a,($c4aa)   ;   HOST-Speicher Addr 004A:000a (Datenbyte)
+        ld      (hl),a      ;   Flash schreiben
+exit:   xor     a,a
+        ld      ($c4a6),a   ;   Kommando auf 0 setzen, ist Fertig-Meldung
+        scf                 ;   Kein Interrupt im Host-System
+        ret
+fx1:    cp      a,2         ;   Lese-Kommando?
+        jr      nz,fx2
+        ld      a,(hl)      ;   Flash lesen
+        ld      ($c4aa),a   ;   HOST-Speicher Addr 004A:000a (Datenbyte)
+        jr      exit
+fx2:    cp      a,3         ;   Leertest-Kommando?
+        jr      nz,fx3
+        ld      c,$11       ;   Loop High+1
+        ld      b,0         ;   Loop Low
+fl0:    ld      a,$ff       ;   Vergleichswert
+fl1:    cp      a,(hl)
+        jr      nz,fe1      ;   bei nicht-uebereinstimmung abbrechen
+        inc     hl
+        djnz    fl1         ;   Low Loop
+        ld      a,c
+        dec     a
+        ld      c,a
+        jr      nz,fl0      ;   High Loop
+fe1:    ld      ($c4a7),hl  ;   $A000 bei Erfolg, oder Fehler-Addresse
+        jr      exit
+fx3:    cp      a,4         ;   Blocklese-Kommando?
+        jr      nz,fx4
+        ld      de,$2100
+        ld      bc,$800
+        ldir
+        jr      exit
+fx4:    jr      exit        
 fe:

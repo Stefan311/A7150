@@ -170,13 +170,7 @@ procedure Schreiben;
     begin
       while ok and (i<sizeof(puffer)) do begin
         asm CLI end; {disable}
-        case dev of $04     : WMem(adr,$10); { Byte Program }
-                    $B5,$B6,$B7 : begin
-                                WMem($5555,$AA);
-                                WMem($2AAA,$55);
-                                WMem($5555,$A0);
-                              end;
-        end;
+        WMem(adr,$10); { Byte Program }
         WMem(adr,puffer[i]);
         asm STI end; {enable}
         t:=tick+2; { ca. 50ms Time-Out (jenseits von gut und boese) fuer Byte-Write }
@@ -185,16 +179,34 @@ procedure Schreiben;
         inc(adr); inc(i);
       end;
     end;
+    procedure WriteKes;
+    {$I sstflash.inc}
+    begin
+      Kes_Buffer_Clear;
+      Kes_Load_Exec_Const(sstflash);
+      for i:=0 to sizeof(puffer)-1 do
+        Kes_Data[i+256]:=puffer[i];
+      Kes_Data[$F0]:=adr SHR 12;
+      Kes_Data[$F1]:=adr AND $FF;
+      Kes_Data[$F2]:=((adr SHR 8) AND $0F) OR $90;
+      Kes_Buffer_Transfer(true,sizeof(puffer)+256);
+      Kes_Exec;
+      Kes_Buffer_Transfer(false,256);
+      ok:=Kes_Data[$F3]=1;
+      i:=Kes_Data[$F4]+(Kes_Data[$F5] SHL 8);
+      adr:=adr+i;
+    end;
   begin { WriteSST }
     i:=sizeof(puffer);
-    while ok and (adr<memsize) do begin
+    while ok and (adr<datsize) do begin
       if (i>=sizeof(puffer)) and (adr<=(memsize-sizeof(puffer))) then begin
         fread;
         i:=0;
       end;
       write(ATH(adr));
       case dev of $07,$10     : WritePage128; { PH29EE010/020 }
-                  $04,$B5,$B6,$B7 : WritePuffer;  { PH28SF040, PH39SF010/20 }
+                  $04         : WritePuffer;  { PH28SF040 }
+                  $B5,$B6,$B7 : WriteKes; { PH39SF010/20 }
       end;
       write(#8#8#8#8#8#8);
     end;
@@ -269,7 +281,7 @@ procedure Schreiben;
 
 { procedure Schreiben }
 begin
-  reset(infile);
+  reset(infile,1);
   adr:=0;
   case sprache of 'D' : write('Programmiere:  $');
                   'N' : write('Programmeren:  $');

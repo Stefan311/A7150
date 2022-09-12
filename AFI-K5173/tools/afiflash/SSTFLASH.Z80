@@ -1,0 +1,45 @@
+        org    $2100
+
+        ld      ix,$2200    ; Startaddresse Daten
+        ld      c,$b2       ; Flash-Page Port
+        ld      e,0         ; Low-Zaehler
+        ld      d,8         ; High-Zaehler
+        ld      hl,($21f1)  ; Flash-Startaddresse (Kes_Data[$f1..$f2])
+
+L1   :  ld      a,$05       ; Programm-Sequenz
+        out     (c),a
+        ld      a,$aa
+        ld      ($9555),a
+        ld      a,$02
+        out     (c),a
+        ld      a,$55
+        ld      ($9aaa),a
+        ld      a,$05
+        out     (c),a
+        ld      a,$a0
+        ld      ($9555),a
+
+        ld      a,($21f0)   ; Segment-Addresse (Kes_Data[$f0])
+        out     (c),a
+        ld      a,(ix+0)
+        ld      (hl),a      ; Flash schreiben
+        ld      b,0
+L2:     cp      a,(hl)      ; Ergebnis pruefen
+        jr      z,L4
+        djnz    L2          ; max 27 Takte * 256 ~~ 7ms
+        ld      a,0
+
+L3:     ld      ($21f3),a   ; Status (Kes_Data[$f3])
+        ld      bc,$de00    ; $10000-$2200
+        add     ix,bc
+        ld      ($21f4),ix  ; Anzahl geschriebener Bytes (Kes_Data[$f4..$f5])
+        ret
+
+L4:     inc     ix
+        inc     hl
+        dec     e
+        jr      nz,L1
+        dec     d
+        jr      nz,L1
+        ld      a,1
+        jr      L3

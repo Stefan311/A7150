@@ -57,7 +57,7 @@ var sprache  : char;         { 'D'eutsch/Default, 'E'nglish, 'N'ederlands }
     lockout  : boolean;      { Boot Block Lockout bei manchen Chips }
     memsize  : longint;      { Kapazitaet des Bausteins in Byte }
     typ      : string;       { Typenbezeichnung des Bausteins }
-    infile   : file of byte; { Datei fuer's Einlesen... }
+    infile   : file;         { Datei fuer's Einlesen... }
     outfile  : file of page; { ...und fuer's Ausgeben }
     puffer   : page;         { und Puffer fuer BIOS-Inhalt }
     adr      : longint;      { fortlaufende Zieladresse im Flash }
@@ -82,7 +82,13 @@ end;
 procedure fread;
 var i : word;
 begin
-  for i:=0 to 2047 do if not EOF(infile) then read(infile,puffer[i])
+  if adr+2048<=datsize then 
+    blockread(infile,puffer,2048)
+  else 
+    begin
+      for i:=0 to 2047 do puffer[i]:=255;
+      blockread(infile,puffer,datsize-adr);
+    end;    
 end;
 
 procedure Pause(n:longint); { wartet n * 15,6 us }
@@ -196,22 +202,30 @@ begin
   end{case};
   adr:=0;
   while (adr<memsize) and ok do begin
-    if (adr and $7FF)=0 then write(#8#8#8#8#8#8,ATH(adr));
-    ok:=(RMem(adr)=$FF);
-    if ok then inc(adr);
+    write(#8#8#8#8#8#8,ATH(adr));
+    Mem[$4A:9]:=adr SHR 12;     { Segment }
+    Memw[$4A:7]:=$9000;         { Startaddresse Flash-Bereich in der KES }
+    Mem[$4A:6]:=3;              { Kommando: Leertest }
+    Port[$4B]:=1;               { KES Wakeup Chan 2 }
+    repeat until Mem[$4A:6]=0;  { Warten bis die KES fertig ist }
+    ok:=(Memw[$4A:7]=$A000);    { Bis zum Ende durchgelaufen? }
+    if ok then adr:=adr+$1000 
+          else adr:=(adr and $fffff000) or (Memw[$4A:7] and $0fff);
   end;
   write(#8#8#8#8#8#8,ATH(adr)); writeln;
-  if not ok then case sprache of 'D' : writeln('Baustein ist nicht komplett gel'+#148+'scht, bitte nochmal versuchen.');
-                                 'N' : writeln('Chip is niet geheel gewist, probeer het nog eens aub.');
-                                  else writeln('Chip didn''t erase completely, please try again.');
-                 end{case};
+  if not ok then 
+     case sprache of 
+       'D' : writeln('Baustein ist nicht komplett gel'+#148+'scht, bitte nochmal versuchen.');
+       'N' : writeln('Chip is niet geheel gewist, probeer het nog eens aub.');
+       else  writeln('Chip didn''t erase completely, please try again.');
+     end;
 end;
 
 {$I WRITE.INC}
 
 procedure Pruefen;
 begin
-  reset(infile);
+  reset(infile,1);
   verify:=true;
   adr:=0;
   case sprache of 'D' : write('Verifiziere:   $');
@@ -222,8 +236,13 @@ begin
     fread;
     write(ATH(adr));
     i:=0;
+    SetAdr(adr);
+    Mem[$4A:6]:=4;              { Kommando: Blockread }
+    Port[$4B]:=1;               { KES Wakeup Chan 2 }
+    repeat until Mem[$4A:6]=0;  { Warten bis die KES fertig ist }
+    Kes_Buffer_Transfer(false, $800);
     while (i<sizeof(puffer)) and verify do begin
-      verify:=(RMem(adr)=puffer[i]);
+      verify:=(Kes_Data[i]=puffer[i]);
       inc(adr); inc(i);
       if not verify then dec(adr);
     end;
@@ -249,8 +268,13 @@ begin
   while (adr<memsize) do begin
     i:=0;
     write(#8#8#8#8#8#8,ATH(adr)); 
+    SetAdr(adr);
+    Mem[$4A:6]:=4;              { Kommando: Blockread }
+    Port[$4B]:=1;               { KES Wakeup Chan 2 }
+    repeat until Mem[$4A:6]=0;  { Warten bis die KES fertig ist }
+    Kes_Buffer_Transfer(false, $800);
     while (i<sizeof(puffer)) do begin
-      puffer[i]:=RMem(adr);
+      puffer[i]:=Kes_Data[i];
       inc(i); inc(adr);
     end;
     write(outfile,puffer);
@@ -309,7 +333,7 @@ begin { Hauptprogramm }
     if not Lesen then begin
       assign(infile,filename);
       {$I-}
-      reset(infile);
+      reset(infile,1);
       {$I+}
       if (IOResult<>0) then begin
         ok:=false;
