@@ -1,0 +1,256 @@
+; Copyright (c) 2022, Stefan Berndt
+;
+; All rights reserved.
+;
+; Redistribution and use in source and binary forms, with or without 
+; modification, are permitted provided that the following conditions are met:
+; 1. Redistributions of source code must retain the above copyright notice, 
+;    this list of conditions and the following disclaimer.
+; 2. Redistributions in binary form must reproduce the above copyright notice, 
+;    this list of conditions and the following disclaimer in the documentation 
+;    and/or other materials provided with the distribution.
+;
+; THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" 
+; AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE 
+; IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE 
+; ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE 
+; LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR 
+; CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF 
+; SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS 
+; INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN 
+; CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) 
+; ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF 
+; THE POSSIBILITY OF SUCH DAMAGE.
+
+
+; *********  Firmware fuer IDE-Kontroller AFI-K5173   ***********
+; HINWEIS:
+; Diese Firmware-Version implementiert nur einen kleinen Teil der geplanten Funktionen.
+; Sie ist eher als Demonstrations,- und Lernobjekt zu sehen, als ein fertiges Produkt.
+; Features:
+; - Stellt den Inhalt des Flashrom als Diskettenlaufwerk 0 zur Verfuegung
+; - Verschiebt die anderen Diskettenlaufwerke
+; - keine IDE-Funktionen
+; ***************************************************************
+
+
+; Parameter von und zur KES
+FUNKTIONSCODE   equ     $3b2e+11
+LAUFWERKNR      equ     $3b2e+10
+ZYLINDER        equ     $3b2e+14
+KOPF            equ     $3b2e+16
+SEKTOR          equ     $3b2e+17
+BYTECOUNT       equ     $3b2e+4
+BUFFER          equ     $3b2e+6
+ERRORREG        equ     $3b22
+
+; Speicher fuer AFI
+MBUFFER         equ     $3e80
+MSECCOUNT       equ     $3e82
+
+; Einsprungpunkte von KES-Firmware
+                org     $5000
+                jp      Chan2           ; Einsprungpunkt von KES-Firmware, wird ausgeloest wenn im Host-System $01 auf Port $1B geschrieben wird
+                jp      Reset           ; Einsprungpunkt von KES-Firmware, aufgerufen einmal beim Reset der KES
+                jp      Cyclic          ; Einsprungpunkt von KES-Firmware, wird zyklisch aufgerufen
+
+; Service-Routine fuer Kanal 2
+Chan2:          scf                     ; Carry gesetzt heisst kein Fertig-Interrupt im Hostsystem ausloesen
+                ret
+
+; Reset-Routine
+Reset:          in      a,($b1)         ; Betriebsarten-Schalter
+                and     a,$f0
+                ret     z               ; bei Schalter "0" die AFI nicht initialisieren, fuer Debug hilfreich
+                ld      hl,HDDService   
+                ld      ($3b6b),hl      ; Jump-Vector HDD Service
+                ld      hl,DiskService
+                ld      ($3b74),hl      ; Jump-Vector FDD Service
+                ret
+
+; Wird zyklisch aufgerufen
+Cyclic:         xor     a
+                ret
+
+; Service-Routine fuer Festplattenzugriffe
+HDDService:     ld      a,$7f           ; LED 1 ein
+                out     ($b1),a         
+                call    $1000           ; MFM-Firmware aufrufen
+                ld      a,$3f           ; LEDs aus
+                out     ($b1),a
+                ret
+
+
+; Service-Routine fuer Diskettenzugriffe
+DiskService:    ld      a,(LAUFWERKNR)  ; gewuenschtes Diskettenlaufwerk von KES
+                cp      a,$10           ; erstes logisches Laufwerk?
+                jr      z,Disk_2        ; Das ist unser!
+                cp      a,$11           ; zweites logisches Laufwerk?
+                jr      nz,Disk_0
+                ld      a,$10           ; so wird das 2. logische Laufwerk zum 1. Physikalischen
+                ld      (LAUFWERKNR),a
+                jr      Disk_1
+Disk_0:         cp      a,$12           ; drittes logisches Laufwerk?
+                jr      nz,Disk_1
+                ld      a,$11           ; so wird das 3. logische Laufwerk zum 2. Physikalischen
+                ld      (LAUFWERKNR),a
+Disk_1:         jp      $4000           ; Firmware fuer die Physikalischen Disk-Laufwerke aufrufen
+
+; ROM-Disk Funktionen
+Disk_2:         ld      a,(FUNKTIONSCODE)
+                cp      a,0             ; Init?
+                jp      z,Disk_OK       ; hier gibts nix zu Initialisieren
+                cp      a,2             ; Format?
+                jr      z,Disk_ErrorRO  ; und auch nichts zu Formatieren
+                cp      a,4             ; Lesen Host?
+                jr      z,Disk_Read     ; Lesen ist alles was wir koennen!
+                cp      a,5             ; Lesen Kes?
+                jr      z,Disk_Read
+                cp      a,6             ; Schreiben Host?
+                jr      z,Disk_ErrorRO  ; NOPE!
+                cp      a,7             ; Schreiben Kes?
+                jr      z,Disk_ErrorRO
+                cp      a,8             ; Seek?
+                jp      z,Disk_OK       ; Der Kopf-Motor ist sofort fertig...
+                ld      bc,$0800        ; alle anderen Funktionen: Errorcode: Parameterfehler
+                jp      Disk_Ende
+
+Disk_ErrorRead: ld      bc,$1080        ; Errorcode: Plattenende erreicht + Sektor nicht gefunden
+                jp      Disk_Ende
+
+Disk_ErrorRO:   ld      bc,$8000        ; Errorcode: Schreibschutz aktiv
+                jp      Disk_Ende
+
+; Start-CHR im Errorblock sichern
+Disk_Read:      ld      a,$bf           ; LED 2 an
+                out     ($b1),a
+            
+                ld      hl,(ZYLINDER)   ; Start-CHS muss im ERROR-Register zurueckgegeben werden
+                ld      (ERRORREG+3),hl
+                ld      hl,(KOPF)       ; das ist auch noch +SEKTOR
+                ld      (ERRORREG+5),hl
+
+                in      a,($b1)         ; Betriebsarten-Schalter
+                and     a,$80           ; Disk nur bei geraden Schalter-Stellungen aktivieren, da der sonst immer von der ROM-Disk booten wuerde
+                jr      nz,Disk_Read_0
+                ld      bc,$4000        ; Errorcode: Disk nicht bereit
+                jp      Disk_Ende
+
+
+; Start-Parameter sichern
+Disk_Read_0:    ld      hl,(BUFFER)     ; Start-Buffer-Pointer privat speichern, im KES-Parameter-Block soll nicht geaendert werden
+                ld      (MBUFFER),hl
+                ld      a,(BYTECOUNT+1) ; High-Byte Bytecounter
+                sra     a               ; /2, damit haben wir den 512-Byte-Block-Counter
+                ld      (MSECCOUNT),a 
+                jr      nz,Disk_Read_3  ; Leseversuche mit einzelnen 128-Byte Sektoren gibt hier 0 Sektoren
+                ld      bc,$1000        ; wir machen nur 512-Byte-Sektoren, also: Errorcode: Sektor nicht gefunden
+                jp      Disk_Ende
+
+; CHS in LBA umrechnen  (LBA=(Cylinder*2+Head)*9+Sector-1)
+Disk_Read_3:    ld      hl,(ZYLINDER)
+                sla     l
+                rl      h               ; *2
+                ld      a,(KOPF)
+                ld      c,a
+                ld      b,0
+                add     hl,bc           ; +Head
+                ld      bc,hl
+                sla     c
+                rl      b
+                sla     c
+                rl      b
+                sla     c
+                rl      b
+                add     hl,bc           ; *(8+1)
+                ld      a,(SEKTOR)
+                ld      c,a
+                ld      b,0
+                add     hl,bc           ; +Sector
+                dec     hl              ; =LBA im hl
+
+; LBA in Flashaddresse umrechnen
+                ld      b,l
+
+                sra     h
+                rr      l
+                sra     h
+                rr      l
+                sra     h               ; /8
+                rr      l	            ; L ist nun Flashsegment
+                ld      a,l
+                inc     a               ; Segment 0 ist die AFI-Firmware selber, also +1
+
+                cp      a,$80           ; "Diskende" erreicht? ($80=512k Flash, $40=256k Flash, $20=128k Flash)
+                jr      nc,Disk_ErrorRead
+
+                out     ($b2),a         ; Flash-Segment-Register, schaltet Flash auf Addresse $9000-$9FFF um
+                
+                ld      a,b             ; Sektor-Offset
+                sla     a
+                and     a,$0e
+                or      a,$90
+                ld      h,a
+                ld      l,0	            ; HL ist nun Flashaddresse
+
+; Sektordaten kopieren
+                ld      de,(MBUFFER)
+                ld      bc,512
+                ldir                    ; DMA-Kontroller waere schneller, ist mir hier aber zu aufwaendig ;)
+                ld      (MBUFFER),de
+
+; CHS um eins erhoehen
+                ld      a,(SEKTOR)
+                inc     a
+                ld      (SEKTOR),a
+                cp      a,10
+                jr      c,Disk_Read_1
+                ld      a,1
+                ld      (SEKTOR),a
+                ld      a,(KOPF)
+                inc     a
+                ld      (KOPF),a
+                cp      a,2
+                jr      c,Disk_Read_1
+                ld      a,0
+                ld      (KOPF),a
+                ld      a,(ZYLINDER)
+                inc     a
+                ld      (ZYLINDER),a
+
+; Sektorcounter reduzieren
+Disk_Read_1:    ld      a,(MSECCOUNT)
+                dec     a
+                ld      (MSECCOUNT),a
+                jr      nz,Disk_Read_3  ; Fertig?
+
+Disk_OK:        ld      bc,0            ; Errorcode: kein Fehler
+
+                ld      a,$3f           ; LEDs aus
+                out     ($b1),a
+            
+; Errorcode schreiben und Ende
+Disk_Ende:      ld      (ERRORREG),bc
+                ld      a,0
+                ld      (ERRORREG+2),a
+                ld      hl,(ZYLINDER)
+                ld      (ERRORREG+7),hl
+                ld      hl,(KOPF)
+                ld      (ERRORREG+9),hl
+                ld      a,b
+                or      a,c             ; Zero-Flagg=0 heisst fehlerfrei
+                scf                     ; Carry gesetzt heisst Diskettenwechsel erkannt
+                ccf                     ; ... kann uns aber nicht passieren
+                ret
+
+                org     $57fc
+                db      $10             ; Version 1.0
+                db      $51             ; ROM-Kennung: Custom Messplatine Teil 1
+                dw      0               ; CRC, diese wird spaeter mit dem CRCTOOL berechnet
+
+                org     $5ffc
+                db      $10             ; Version 1.0
+                db      $52             ; ROM-Kennung: Custom Messplatine Teil 2
+                dw      0               ; CRC, diese wird spaeter mit dem CRCTOOL berechnet
+
+

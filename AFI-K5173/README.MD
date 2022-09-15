@@ -13,9 +13,9 @@ Test auf Steckbrett: *fertig*
 
 PCB Layout: *fertig*
 
-PCB Prototyp: *beim Zoll*
+PCB Prototyp: *fertig, funktioniert*
 
-Firmware: *begonnen*
+[Firmware:](firmware/) *macht Fortschritte*
 
 [Tools:](tools/)
 + Memorydump (KESDump): *fertig*
