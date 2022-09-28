@@ -25,12 +25,22 @@
 
 ; *********  Firmware fuer IDE-Kontroller AFI-K5173   ***********
 ; HINWEIS: das ist eine sehr fruehe Alpha-Version 
-; Version: 0.1
+; Version: 0.2
 ; Features:
 ; - Schalterstellungen: 0=MFM, 1=Primary IDE, 2=Secundary IDE
 ; - IDE-Adressmodus: LBA28 (nicht geeignet fuer sehr alte IDE-Platten)
 ; - CHS zu LBA Umrechnung mit einstellbaren Parametern
 ; - Datentransfer mit Z80-DMA in den KES-Buffer
+;
+; Version Log:
+; V0.1
+; Basisversion
+;
+; V0.2
+; - Bugfix CHS-LBA Umrechnung
+; - IDE Statusabfrage vor Lesen/Schreiben und nach Schreiben
+; - einfacher Error-Log
+; - verlaengerte Wartezeit beim Initialisieren
 ; ***************************************************************
 
 
@@ -56,6 +66,10 @@ MCYLINDERCT     equ     $3a12           ; Anzahl Zylinder
 MDMA_PARAM      equ     $3a40           ; 21 bytes, Kopie von dma_param_st
 MBUFFER         equ     $3a42           ; Addresse Sektorbuffer, liegt mit Absicht mittem in den DMA-Parametern
 MDMA_DIR        equ     $3a52           ; Transfer-Richtung, liegt mit Absicht mittem in den DMA-Parametern
+
+MERRORSTART     equ     $3510           ; Beginn Errorlog-Ringbuffer
+MERRORENDE      equ     $39ff           ; Ende Errorlog-Ringbuffer
+MERRORPTR       equ     $3500           ; Zeiger auf naechste Addresse im Ringpuffer
 
 ; IO-Register
 REG_DATA        equ     $B0             ; IO-Port IDE-Daten (Lesen und Schreiben)
@@ -105,7 +119,15 @@ Cyclic:         xor     a
 
 ; ***************************************************************
 ; Service-Routine fuer Festplattenzugriffe
-HDDService:     ld      a,(FUNKTIONSCODE)
+HDDService:     ld      a,(LAUFWERKNR)
+                cp      a,1
+                jp      nz,HDDService_0
+
+                ld      a,0
+                ld      (LAUFWERKNR),a
+                jp      $1000
+
+HDDService_0:   ld      a,(FUNKTIONSCODE)
                 cp      a,0             ; Init?
                 jr      z,HDD_Init
                 cp      a,2             ; Format?
@@ -125,6 +147,8 @@ HDDService:     ld      a,(FUNKTIONSCODE)
                 cp      a,15            ; Diagnostik?
                 jr      z,HDD_OK
                 ld      bc,$0800        ; alle anderen Funktionen: Errorcode: Parameterfehler
+                ld      d,1
+                call    ErrorLog
                 jp      HDD_Ende
 
 HDD_OK:         ld      bc,0            ; Errorcode: kein Fehler
@@ -156,7 +180,8 @@ HDD_Init_0:     djnz    HDD_Init_0
                 ld      a,(ix+4)
                 ld      (MSECTORCT),a
 
-                ld      de,0
+                ld      d,20
+                ld      hl,0
 HDD_Init_1:     ld      b,$16
                 ld      a,(MIDE_DEVICE)
                 or      a,$e0
@@ -166,11 +191,15 @@ HDD_Init_1:     ld      b,$16
                 and     a,$e1
                 cp      a,$40           ; Status: Disk bereit
                 jp      z,HDD_OK
-                dec     e
+                dec     l
+                jr      nz,HDD_Init_1
+                dec     h
                 jr      nz,HDD_Init_1
                 dec     d
-                jr      nz,HDD_Init_1
+                jr      nz,HDD_Init_1   ; bis zu 40 Sekunden warten. 
                 ld      bc,$4000        ; Errorcode: Device nicht bereit
+                ld      d,2
+                call    ErrorLog
                 jp      HDD_Ende
 
 
@@ -202,9 +231,22 @@ HDD_Transfer:   ld      hl,(CYLINDER)   ; Start-CHS muss im ERROR-Register zurue
                 ld      (MSECCOUNT),a 
                 jp      nz,HDD_Transfer_1; Leseversuche mit einzelnen 128-Byte Sektoren gibt hier 0 Sektoren
                 ld      bc,$1000        ; wir machen nur 512-Byte-Sektoren, also: Errorcode: Sektor nicht gefunden
+                ld      d,3
+                call    ErrorLog
                 jp      HDD_Ende
 
-HDD_Transfer_1: call    CHS2LBA
+HDD_Transfer_1: ld      a,(MIDE_DEVICE)
+                ld      b,$16
+                call    IDE_Setreg
+                ld      c,$17
+                call    IDE_Getreg
+                bit     6,a
+                jp      nz,HDD_Transfer_5
+                ld      bc,$4000        ; Errorcode: Device nicht bereit
+                ld      d,4
+                call    ErrorLog
+                jp      HDD_Ende
+HDD_Transfer_5: call    CHS2LBA
                 call    SetLBA28
                 ld      b,$12           ; IDE-Register: Anzahl Sektoren
                 ld      a,1             ; nur ein Sektor
@@ -219,9 +261,11 @@ HDD_Transfer_1: call    CHS2LBA
                 ld      b,$17
                 ld      a,$30           ; IDE-Kommando: Sektor schreiben
                 call    IDE_Setreg
-                call    IDE_Wait_Rdy
+                call    IDE_Wait4Data
                 ld      b,$05           ; DMA Richtung: B-->A
                 call    IDE_DMA
+                call    IDE_Wait_Rdy                
+
                 jr      HDD_Transfer_3
                 
 HDD_Transfer_2: ld      a,(MIDE_STEUER)
@@ -230,7 +274,7 @@ HDD_Transfer_2: ld      a,(MIDE_STEUER)
                 ld      b,$17
                 ld      a,$20           ; IDE-Kommando: Sektor lesen
                 call    IDE_Setreg
-                call    IDE_Wait_Rdy
+                call    IDE_Wait4Data
                 ld      b,$01           ; DMA Richtung: A-->B
                 call    IDE_DMA
                 
@@ -268,7 +312,32 @@ HDD_Ende:       ld      a,(MIDE_STEUER)
 
 
 ; ***************************************************************
-; Warten bis die Platte fertig oder Fehler meldet
+; Warten bis die Platte die Bereitschaft zur Datenuebertragung meldet
+IDE_Wait4Data:  ld      a,(MIDE_STEUER)
+                and     a,$E0
+                or      a,$17
+                out     (REG_STEUER),a
+                ld      b,0
+IDE_Wait4Data0: ld      c,b
+                ld      b,0
+IDE_Wait4Data1: in      a,(REG_RESET)
+                in      a,(REG_DATA)
+                bit     3,a
+                ret     nz
+                bit     0,a
+                jr      nz,IDE_Wait4Data2
+                djnz    IDE_Wait4Data1
+                ld      b,c
+                djnz    IDE_Wait4Data0
+IDE_Wait4Data2: pop     bc
+                ld      bc,$1000
+                ld      d,5
+                call    ErrorLog
+                jr      HDD_Ende
+
+
+; ***************************************************************
+; Warten bis die Platte die Beendigung der Operation meldet
 IDE_Wait_Rdy:   ld      a,(MIDE_STEUER)
                 and     a,$E0
                 or      a,$17
@@ -278,8 +347,8 @@ IDE_Wait_Rdy_0: ld      c,b
                 ld      b,0
 IDE_Wait_Rdy_1: in      a,(REG_RESET)
                 in      a,(REG_DATA)
-                bit     3,a
-                ret     nz
+                bit     7,a
+                ret     z
                 bit     0,a
                 jr      nz,IDE_Wait_Rdy_2
                 djnz    IDE_Wait_Rdy_1
@@ -287,8 +356,9 @@ IDE_Wait_Rdy_1: in      a,(REG_RESET)
                 djnz    IDE_Wait_Rdy_0
 IDE_Wait_Rdy_2: pop     bc
                 ld      bc,$1000
+                ld      d,6
+                call    ErrorLog
                 jr      HDD_Ende
-
 
 ; ***************************************************************
 ; Setze einzelnes IDE-Register (a)-->Register(b) 
@@ -387,11 +457,11 @@ Mul_48bX8b_2:   rl      (hl)
                 ld      de,(MLBA2+2)
                 ld      hl,(MLBA1+2)
                 adc     hl,de
-                ld      (MLBA2+2),hl
+                ld      (MLBA1+2),hl
                 ld      de,(MLBA2+4)
                 ld      hl,(MLBA1+4)
                 adc     hl,de
-                ld      (MLBA2+4),hl
+                ld      (MLBA1+4),hl
 
 Mul_48bX8b_1:   ld      b,c
                 djnz    Mul_48bX8b_0
@@ -433,9 +503,9 @@ IncCHS:         ld      a,(SECTOR)
                 ret     nz
                 ld      a,0
                 ld      (HEAD),a
-                ld      a,(CYLINDER)
-                inc     a
-                ld      (CYLINDER),a
+                ld      hl,(CYLINDER)
+                inc     hl
+                ld      (CYLINDER),hl
                 ret
 
 
@@ -484,6 +554,68 @@ dma_dir:        db      $01             ; Transfer direction
 
 dma_param_en:   db      0
 
+; ***************************************************************
+; Error Logging
+ErrorLog:       push    bc
+                ld      bc,(MERRORPTR)
+                ld      hl,MERRORENDE
+                scf
+                sbc     hl,bc
+                jr      c,ErrorLog_1
+                ld      bc,(MERRORPTR)
+                ld      hl,MERRORSTART
+                sbc     hl,bc
+                jr      c,ErrorLog_2
+ErrorLog_1:     ld      hl,MERRORSTART
+                ld      (MERRORPTR),hl
+ErrorLog_2:     ld      hl,(MERRORPTR)
+                pop     bc
+                ld      (hl),d
+                inc     hl
+                ld      (hl),a
+                inc     hl
+                ld      (hl),c
+                inc     hl
+                ld      (hl),b
+                inc     hl
+                ld      a,(FUNKTIONSCODE)
+                ld      (hl),a
+                inc     hl
+                ld      a,(LAUFWERKNR)
+                ld      (hl),a
+                inc     hl
+                ld      a,(LAUFWERKNR)
+                ld      (hl),a
+                inc     hl
+                ld      a,(CYLINDER)
+                ld      (hl),a
+                inc     hl
+                ld      a,(CYLINDER+1)
+                ld      (hl),a
+                inc     hl
+                ld      a,(CYLINDER)
+                ld      (hl),a
+                inc     hl
+                ld      a,(HEAD)
+                ld      (hl),a
+                inc     hl
+                ld      a,(SECTOR)
+                ld      (hl),a
+                inc     hl
+                ld      a,0
+                ld      (hl),a
+                inc     hl
+                ld      a,0
+                ld      (hl),a
+                inc     hl
+                ld      a,0
+                ld      (hl),a
+                inc     hl
+                ld      a,0
+                ld      (hl),a
+                inc     hl
+                ld      (MERRORPTR),hl
+                ret
 
 ; ***************************************************************
 

@@ -1,6 +1,6 @@
 # Firmware-Versionen
 
-###[Rom-Floppy:](rom_disk/)
+[Rom-Floppy:](rom_disk/)
 
 Diese Firmware-Version implementiert nur einen kleinen Teil der geplanten Funktionen.
 Sie ist eher als Demonstrations,- und Lernobjekt zu sehen, als ein fertiges Produkt.
@@ -12,7 +12,7 @@ Features:
 + keine IDE-Funktionen
 
 
-###[Einfach IDE:](ide/)
+[Einfach IDE:](ide/)
 
 Firmware zum Ansteuern von IDE-Festplatten ohne Schnickschnack
 
