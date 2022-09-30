@@ -7,15 +7,9 @@ AFI ist einen Platine, mit dem IDE-Festplatten an das Datenträger-Subsystem des
 * Firmware Flashrom im System beschreibbar
 ### Wie ist der Projektstatus?
 
-Schaltungsentwurf: *fertig*
+[Schaltungsentwurf und PCB Layout:](schaltplan) *fertig*
 
-Test auf Steckbrett: *fertig*
-
-PCB Layout: *fertig*
-
-PCB Prototyp: *fertig, funktioniert*
-
-[Firmware:](firmware/) *macht Fortschritte*
+[Firmware:](firmware/) *im Krabbel-Alter*
 
 [Tools:](tools/)
 + Memorydump (KESDump): *fertig*
@@ -25,3 +19,5 @@ PCB Prototyp: *fertig, funktioniert*
 + SMART-Info (AFISmart): *noch nicht begonnen*
 + Z80-Programm-Tool (BIN2INC): *fertig*
 + CRC-Generator (CRCTOOL): *fertig*
+
+[Anleitungen: Hardware-Test](knowhow/Hardwaretest.MD)
