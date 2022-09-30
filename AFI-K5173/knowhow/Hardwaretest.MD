@@ -1,5 +1,6 @@
-# Hardware-Tests mit der AFI-K5173
+﻿# Hardware-Tests mit der AFI-K5173
 Zum Testen der Grundfunktion ist das Programm [AFITEST](../tools/afitest) vorgesehen.
+
 ---
 ### Frontpanel
 - LED 1 ein: `o b1 40`
@@ -8,6 +9,7 @@ Zum Testen der Grundfunktion ist das Programm [AFITEST](../tools/afitest) vorges
 - Schalter lesen: `i b1`
 
 Die Schalterbits sind bei der 1. Platinen-Version seitenverkehrt. Bit 0 = 80, 1 = 40, 2 = 20, 3 = 10
+
 ---
 ### IDE Signale
 Am besten ein IDE-Kabel ohne Festplatte anstecken und an einem freien Stecker messen.
@@ -64,23 +66,28 @@ Zum Testen der Lesefunktion die Datenleitungen auf High legen (am besten mit ein
 *Tip 1*: Wenn man weiß ob gerade D0-D7 oder D8-D15 dran sind, dann kann man das erste `i b2` weglassen.
 
 *Tip 2*: Eine leere Eingabe wiederholt den letzten Befehl. Man braucht also nur 2x Enter zum Testen eines Pins zu drücken.
+
 ---
 ### IDE mit angeschlossener Festplatte
 Wenn bisher alles geklappt hat, dann kann man eine Festplatte anschließen.
 - Festplatte resetten: `o b1 18` und `o b1 38`. Der Reset sollte in der Platte eine kurze hörbare Reaktion auslösen. Bei 2 meiner Platten ist diese allerdings sehr leise. Wenn die Platte nicht richtig gejumpert (Master/Single/Slave) ist, dann kann es bis zu 30 Sekunden dauern ehe die Platte danach wieder reagiert.
+
 Zum weiteren Testen wird das AFITEST in den IDE-Testmodus versetzt: `d`
 - Anwahl ob Master oder Slave: `dp` bzw. `ds`.
 - Alle IDE-Register lesen: `a`. Es sollte so etwas wie `Err=01 Count=00 SecNr=01 CylLow=00 CylHi=00 Dev=00 Status=50` anzeigen. Besonders wichtig ist hier der Status=50, was bedeutet dass die Platte bereit für Kommandos ist.
 - Dann geben wir doch mal ein Kommando: `w 17 ec`. W heißt ein IDE-Register zu beschreiben, 17 ist das Kommandoregister, ec ist der Befehl für "Identifiziere dich!".
 - Nun müsste sich das Statusregister geändert haben: `a` --> `Err=01 Count=00 SecNr=01 CylLow=00 CylHi=00 Dev=00 Status=58`. Die Status=58 bedeutet dass die Platte Nutzdaten senden oder empfangen will.
 - Dann rufen wir doch mal diese Daten ab: `brd`. Es sollte ein Hexdump erscheinen, in dem man im oberen Bereich die Typbezeichnung der Festplatte sehen kann.
+
 Zum Basis-Testmodus kann man mit `x` zurückkehren
+
 ---
 ### Firmware-Flashrom testen
 Wer ein Flashrom mit bekanntem Inhalt hat, der kann dieses zum Testen nutzen. Ich gehe mal davon aus dass ihr für das Flashrom einen IC-Sockel verwendet.
 - Byte aus Flashrom lesen (Firmware-Bereich): `r 5000` sollte das erste Byte ausgeben, `r 5001` das zweite usw. 
 Wenn der Jumper "Firmware" auf "AUS" steht, dann sollte hier nicht der Inhalt des Flashroms kommen, sondern irgendetwas.
 - Byte aus Flashrom lesen (Programmierbereich): `o b2 00` und `r 9000`. Hier sollte wieder das erste Byte des Flashroms kommen. Mit `o b2 01` und `r 9000` sollte das 4096ste byte kommen, mit `o b2 02` und `r 9000` das 8192ste byte, usw.
+
 Zum vollständigen lesen und (eventuell) schreiben des Flashroms kann das Tool [AFIFLASH](../tools/afiflash) benutzt werden.
 
 HINWEIS: Onboard flash funktioniert bisher nur mit dem SST39SF040. Ich habe auch ST28F101, M5M28F101, AT29C010A getestet. Die lassen sich alle auslesen (und demzufolge auch als Firmwarebaustein nutzen), aber NICHT onboard flashen. Das liegt vermutlich daran, dass die Programmier-Sequenzen durch die Übertragung in die KES zu langsam sind. Abhilfe könnte hier geschaffen werden, indem der Flash-Algorithmus direkt in der KES ausgeführt wird. Ich habe vor, das zumindest für die genannten Typen zu programmieren. Bis dahin verwendet bitte einen Chip der SST39F-Serie oder einen exteren Flash-Programmierer.
