@@ -20,6 +20,15 @@ cd afiflash
 call build.bat
 @if not exist afiflash.exe goto error
 @cd ..
+
+cd fixwinch
+call build.bat
+@if not exist fixwinch.exe goto error
+@cd ..
+
+cd firmware
+call build.bat
+
 @echo "Fertig"
 @pause
 @exit 0

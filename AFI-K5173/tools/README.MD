@@ -26,3 +26,5 @@ Wandelt Binärdateien, wie sie der AS80 ausspuckt in Pascal-Konstanten-Text um. 
 ### CRC-Generator (CRCTOOL)
 Erzeugt eine CRC16-Prüfsumme von Binärdateien. Bei den KES-Firmware-ROM's sind üblicherweise die letzten 2 Bytes die Prüfsumme, und es wird das Startpolynom $FFFF benutzt. Das CRCTOOL kann auch zum schreiben der CRC in die Binärdatei genutzt werden.
 
+### MWINCH-Korrektion-Tool (FIXWINCH)
+Ermöglicht das Einstellen der Festplattengeometrie über die Begrenzungen des MWINCH hinaus. Korregiert außerdem fehlerhafte Einstellungen, so dass auch Festplatten mit unüblichen Geometrien ein GO im ACT erreichen.
