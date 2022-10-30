@@ -1,0 +1,213 @@
+; Copyright (c) 2022, Stefan Berndt
+;
+; All rights reserved.
+;
+; Redistribution and use in source and binary forms, with or without 
+; modification, are permitted provided that the following conditions are met:
+; 1. Redistributions of source code must retain the above copyright notice, 
+;    this list of conditions and the following disclaimer.
+; 2. Redistributions in binary form must reproduce the above copyright notice, 
+;    this list of conditions and the following disclaimer in the documentation 
+;    and/or other materials provided with the distribution.
+;
+; THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" 
+; AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE 
+; IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE 
+; ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE 
+; LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR 
+; CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF 
+; SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS 
+; INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN 
+; CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) 
+; ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF 
+; THE POSSIBILITY OF SUCH DAMAGE.
+
+
+; ***************************************************************
+; Parameter von und zur KES
+FUNKTIONSCODE   equ     $3b2e+11
+LAUFWERKNR      equ     $3b2e+10
+CYLINDER        equ     $3b2e+14
+HEAD            equ     $3b2e+16
+SECTOR          equ     $3b2e+17        ; werden bei KES-Festplatte von 0 gezaehlt!
+BYTECOUNT       equ     $3b2e+4
+BUFFER          equ     $3b2e+6
+ERRORREG        equ     $3b22
+
+; ***************************************************************
+; Parameter vom und zum Hostsystem
+MFMACTIVE       equ     $22d0           ; 0=IDE aktiv, 1=MFM aktiv
+IDE_DEV         equ     $22d1           ; 0=Primary(Master)  $10=Secondary(Slave)
+JPIDE           equ     $22d2           ; Sprungvektor zur IDE-Firmware
+
+PIDE_ON         equ     $22d4           ; Prinaere IDE-Platte online?
+PIDE_CYL        equ     $22d5           ; Zylinder Prinaere IDE-Platte
+PIDE_HDS        equ     $22d7           ; Koepfe Prinaere IDE-Platte
+
+SIDE_ON         equ     $22d8           ; Sekundaere IDE-Platte online?
+SIDE_CYL        equ     $22d9           ; Zylinder Sekundaere IDE-Platte
+SIDE_HDS        equ     $22db           ; Koepfe Sekundaere IDE-Platte
+
+MFM_ON          equ     $22dc           ; MFM-Platte online?
+MFM_CYL         equ     $22de           ; Zylinder MFM-Platte
+MFM_HDS         equ     $22e0           ; Koepfe MFM-Platte
+
+; ***************************************************************
+; Speicher fuer AFI
+MIDE_DEVICE     equ     $3a08           ; 0=Primary(Master)  $10=Secondary(Slave)
+
+                org     $2100
+
+Detect:         ld      hl,($3b6b)
+                ld      bc,$1000
+                scf
+                ccf
+                sbc     hl,bc
+                jr      z,Detect_1
+
+; ***************************************************************
+; IDE ist aktiv, Init und Test MFM
+                ld      a,0
+                ld      (MFMACTIVE),a
+                ld      hl,($3b6b)
+                ld      (JPIDE),hl
+                ld      bc,10           ; Cylinder
+                ld      a,2             ; Koepfe
+                ld      hl,$1000
+                call    Init_Disk
+                jr      nz,Detect_2
+                ld      a,15
+                ld      (FUNKTIONSCODE),a
+                call    $1000
+                jr      nz,Detect_2
+                ld      hl,$1000
+                call    Read_MBR
+                jr      nz,Detect_2
+                ld      bc,($24b0)      ; Anzahl Zylinder aus MBR
+                ld      (MFM_CYL),bc
+                ld      a,($24b2)       ; Anzahl Koepfe
+                ld      (MFM_HDS),a
+                ld      hl,$1000
+                call    Init_Disk
+                jr      nz,Detect_2
+                ld      a,1
+                ld      (MFM_ON),a
+                jr      Detect_3
+Detect_2:       ld      a,0
+                ld      (MFM_ON),a
+                jr      Detect_3
+                
+
+; ***************************************************************
+; MFM ist aktiv, Test MFM
+Detect_1:       ld      a,1
+                ld      (MFMACTIVE),a
+                ld      hl,$1000
+                call    Read_MBR
+                jr      nz,Detect_2
+                ld      hl,($24b0)      ; Anzahl Zylinder aus MBR
+                ld      (MFM_CYL),hl
+                ld      a,($24b2)       ; Anzahl Koepfe
+                ld      (MFM_HDS),a
+                ld      a,1
+                ld      (MFM_ON),a
+
+; ***************************************************************
+; Einsprungaddresse IDE-Service ermitteln
+                ld      ix,$5000
+                ld      b,0
+Detect_4:       ld      a,(ix+0)
+                cp      a,$21
+                jr      nz,Detect_5
+                ld      a,(ix+3)
+                cp      a,$22
+                jr      nz,Detect_5
+                ld      a,(ix+4)
+                cp      a,$6b
+                jr      nz,Detect_5
+                ld      a,(ix+5)
+                cp      a,$3b
+                jr      nz,Detect_5
+                ld      l,(ix+1)
+                ld      h,(ix+2)
+                ld      (JPIDE),hl
+                jr      Detect_3
+Detect_5:       inc     ix
+                djnz    Detect_4
+                ld      a,3
+                ld      (PIDE_ON),a
+                ld      (SIDE_ON),a
+                ret
+
+; ***************************************************************
+; Test IDE Devices
+Detect_3:       ld      a,(MIDE_DEVICE)
+                ld      (IDE_DEV),a
+                ld      hl,(JPIDE)
+                ld      bc,10           ; Cylinder
+                ld      a,2             ; Koepfe
+                call    Init_Disk
+                ld      a,0
+                ld      (MIDE_DEVICE),a
+                ld      hl,(JPIDE)
+                call    Read_MBR
+                ld      a,0
+                jr      nz,Detect_6
+                ld      bc,($24b0)      ; Anzahl Zylinder aus MBR
+                ld      (PIDE_CYL),bc
+                ld      a,($24b2)       ; Anzahl Koepfe
+                ld      (PIDE_HDS),a
+                ld      a,1
+Detect_6:       ld      (PIDE_ON),a
+                ld      a,$10
+                ld      (MIDE_DEVICE),a
+                ld      hl,(JPIDE)
+                call    Read_MBR
+                ld      a,0
+                jr      nz,Detect_7
+                ld      bc,($24b0)      ; Anzahl Zylinder aus MBR
+                ld      (SIDE_CYL),bc
+                ld      a,($24b2)       ; Anzahl Koepfe
+                ld      (SIDE_HDS),a
+                ld      a,1
+Detect_7:       ld      (SIDE_ON),a
+                ld      a,(IDE_DEV)
+                ld      (MIDE_DEVICE),a
+                ret
+
+; ***************************************************************
+; Platte initialisieren
+Init_Disk:      ld      ($2300),bc
+                ld      ($2302),a
+                ld      a,0
+                ld      ($2303),a
+                ld      ($2307),a
+                ld      a,17
+                ld      ($2304),a
+                ld      bc,512
+                ld      ($2305),bc
+                ld      a,0
+                ld      (FUNKTIONSCODE),a
+                ld      (LAUFWERKNR),a
+                ld      a,8
+                ld      (BYTECOUNT),a
+                ld      bc,$2300
+                ld      (BUFFER),bc
+                jp      (hl)
+
+; ***************************************************************
+; MBR Lesen
+Read_MBR:       ld      de,BYTECOUNT
+                ld      b,14
+                ld      a,0
+Read_MBR_1:     ld      (de),a
+                inc     de
+                djnz    Read_MBR_1
+                ld      a,5
+                ld      (FUNKTIONSCODE),a
+                ld      a,2
+                ld      (BYTECOUNT+1),a
+                ld      a,$23
+                ld      (BUFFER+1),a
+                jp      (hl)
+

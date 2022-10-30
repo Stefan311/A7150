@@ -1,0 +1,125 @@
+; Copyright (c) 2022, Stefan Berndt
+;
+; All rights reserved.
+;
+; Redistribution and use in source and binary forms, with or without 
+; modification, are permitted provided that the following conditions are met:
+; 1. Redistributions of source code must retain the above copyright notice, 
+;    this list of conditions and the following disclaimer.
+; 2. Redistributions in binary form must reproduce the above copyright notice, 
+;    this list of conditions and the following disclaimer in the documentation 
+;    and/or other materials provided with the distribution.
+;
+; THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" 
+; AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE 
+; IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE 
+; ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE 
+; LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR 
+; CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF 
+; SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS 
+; INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN 
+; CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) 
+; ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF 
+; THE POSSIBILITY OF SUCH DAMAGE.
+
+
+; ***************************************************************
+; Parameter von und zur KES
+FUNKTIONSCODE   equ     $3b2e+11
+LAUFWERKNR      equ     $3b2e+10
+CYLINDER        equ     $3b2e+14
+HEAD            equ     $3b2e+16
+SECTOR          equ     $3b2e+17        ; werden bei KES-Festplatte von 0 gezaehlt!
+BYTECOUNT       equ     $3b2e+4
+BUFFER          equ     $3b2e+6
+ERRORREG        equ     $3b22
+
+; ***************************************************************
+; Parameter vom und zum Hostsystem (Kanal A)
+JPIDE           equ     $22e0           ; Sprungvektor zur IDE-Firmware
+CYLINDERS       equ     $22e2           ; Anzahl Zylinder fuer Source und Target
+HEADS           equ     $22e4           ; Anzahl Koepfe fuer Source und Target
+
+; ***************************************************************
+; Parameter vom und zum Hostsystem (Kanal B)
+BCMD            equ     $c4a6           ; Firmware-Kommando
+BJMP            equ     $c4a7           ; Sprungvektor zur Firmware
+BPRISEC         equ     $c4a9           ; PRIM/SEC IDE
+BCYL            equ     $c4aa           ; Cylinder
+BHEAD           equ     $c4ac           ; Head
+BSECT           equ     $c4ad           ; Sector
+BERR            equ     $c4a6           ; Fehler-Flag
+
+; ***************************************************************
+; Speicher fuer AFI
+MIDE_DEVICE     equ     $3a08           ; 0=Primary(Master)  $10=Secondary(Slave)
+
+                org     $2100
+
+; ***************************************************************
+; Platte initialisieren
+Init_Disk:      ld      bc,(CYLINDERS)
+                ld      ($2300),bc
+                ld      a,(HEADS)
+                ld      ($2302),a
+                ld      a,0
+                ld      ($2303),a
+                ld      ($2307),a
+                ld      a,17
+                ld      ($2304),a
+                ld      bc,512
+                ld      ($2305),bc
+                ld      a,0
+                ld      (FUNKTIONSCODE),a
+                ld      (LAUFWERKNR),a
+                ld      a,8
+                ld      (BYTECOUNT),a
+                ld      bc,$2300
+                ld      (BUFFER),bc
+                call    $1000
+                ld      hl,ChanB_Inst
+                push    hl
+                ld      hl,(JPIDE)
+                jp      (hl)
+
+; ***************************************************************
+; Kanal-B Handler installieren
+ChanB_Inst:     ld      hl,ChanB        ;   Kommando-Handler
+                ld      de,$3e80        ;   in einen unbenutzten RAM-Bereich
+                ld      bc,ChanB_End-ChanB
+                ldir                    ;   kopieren
+                ld      hl,$3e80        ;   und als Interruptvector
+                ld      ($3b7d),hl      ;   installieren
+                ret
+
+; ***************************************************************
+; Kanal-B Handler
+ChanB:          ld      de,BYTECOUNT
+                ld      b,14
+                ld      a,0
+ChanB_1:        ld      (de),a
+                inc     de
+                djnz    ChanB_1
+                ld      a,(BCMD)
+                ld      (FUNKTIONSCODE),a
+                ld      a,2
+                ld      (BYTECOUNT+1),a
+                ld      a,$21
+                ld      (BUFFER+1),a
+                ld      a,(BPRISEC)
+                ld      (MIDE_DEVICE),a
+                ld      hl,(BCYL)
+                ld      (CYLINDER),hl
+                ld      hl,(BHEAD)
+                ld      (HEAD),hl
+                ld      hl,$3e80+(ChanB_2-ChanB)
+                push    hl
+                ld      hl,(BJMP)
+                jp      (hl)
+ChanB_2:        ld      a,0
+                jr      z,ChanB_3
+                ld      a,1
+ChanB_3:        ld      (BERR),a
+                scf
+                ret
+ChanB_End:
