@@ -26,11 +26,13 @@ Features:
 ---
 [IDE im CHS-Modus:](ide_chs/)
 
-Firmware zum Ansteuern von sehr alten IDE-Festplatten, die nur den CHS-Modus können.
+Firmware zum Ansteuern von IDE-Festplatten im älteren CHS-Modus.
 Hinweise:
-+ Festplatten, die mit dem A7150 (CM1910) benutzt werden, koennen nur am PC benutzt werden, wenn dort exakt die selben CHA-Parameter eingestellt werden.
-+ Da der A7150 auf 17 Sektoren/Track limitiert ist, kann nur ein Bruchteil der Festplattenkapazitaet genutzt werden.
-
++ der CHS-Modus ist nicht mehr Bestandteil der ATA-Spezifikation, allerdings scheinen auch moderne IDE-Platten diesen Modus immer noch zu unterstützen.
++ da die aufwändige CHS-Umrechnung durch die IDE-Platte selber gemacht wird, ist der CHS-Modus etwas schneller als der LBA-Modus.
++ Es sind nur CHS-Parameter Kombinationen erlaubt, die durch die IDE-Interne CHS-Translation erlaubt sind. Welche das sind, hängt von den eingesetzten Festplatten ab. Die Platten, die ich bisher getestet habe, fressen ALLES.
++ Durch die CHS-Translation sind damit Beschriebene Platten relativ gut PC-Kompatibel
++ Platten, die mit Version 0.1 beschrieben worden sind, sind mit 0.2 nicht mehr lesbar.
 Features:
 + Schalterstellungen: 0=MFM, 1=Primary IDE, 2=Secundary IDE
 + IDE-Adressmodus: CHS

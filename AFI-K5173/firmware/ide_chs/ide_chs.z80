@@ -25,12 +25,17 @@
 
 ; *********  Firmware fuer IDE-Kontroller AFI-K5173   ***********
 ; HINWEISE: 
-; 1. Diese Version ist speziell fuer alte IDE-Festplatten, die nur CHS koennen
-; 2. Festplatten, die mit dem A7150 (CM1910) benutzt werden, koennen nur am PC 
-;    benutzt werden, wenn dort exakt die selben CHA-Parameter eingestellt werden.
-; 3. Da der A7150 auf 17 Sektoren/Track limitiert ist, kann nur ein Bruchteil
-;    der Festplattenkapazitaet genutzt werden
-; Version: 0.1
+; 1. der CHS-Modus ist nicht mehr Bestandteil der ATA-Spezifikation, allerdings 
+;    scheinen auch moderne IDE-Platten diesen Modus immer noch zu unterstuetzen.
+; 2. da die aufwaendige CHS-Umrechnung durch die IDE-Platte selber gemacht wird, 
+;    ist der CHS-Modus etwas schneller als der LBA-Modus.
+; 3. Es sind nur CHS-Parameter Kombinationen erlaubt, die durch die IDE-Interne
+;    CHS-Translation erlaubt sind. Welche das sind, haengt von den eingesetzten
+;    Festplatten ab. Die Platten, die ich bisher getestet habe, fressen ALLES.
+; 4. Durch die CHS-Translation sind damit Beschriebene Platten relativ gut PC-Kompatibel
+; 5. Platten, die mit Version 0.1 beschrieben worden sind, sind mit 0.2 nicht mehr lesbar.
+;
+; Version: 0.2
 ; Features:
 ; - Schalterstellungen: 0=MFM, 1=Primary IDE, 2=Secundary IDE
 ; - IDE-Adressmodus: CHS
@@ -39,6 +44,8 @@
 ; Version Log:
 ; V0.1
 ; Basisversion abgeleitet von IDE V0.3 / V0.4
+; V0.2
+; Diese Version nutzt jetzt das CHS-Translation Feature der IDE-Platten
 
 ; ***************************************************************
 ; Schalter fuer Features:
@@ -191,7 +198,7 @@ HDD_Init_1:     ld      b,$16
                 call    IDE_Getreg
                 and     a,$e1
                 cp      a,$40           ; Status: Disk bereit
-                jp      z,HDD_OK
+                jp      z,HDD_Init_2
                 dec     l
                 jr      nz,HDD_Init_1
                 dec     h
@@ -203,6 +210,24 @@ HDD_Init_1:     ld      b,$16
                 call    ErrorLog
                 jp      HDD_Ende
 
+HDD_Init_2:     ld      ix,(BUFFER)
+                ld      a,(ix+2)        ; Heads
+                dec     a
+                and     a,$0f
+                ld      b,a
+                ld      a,(MIDE_DEVICE)
+                or      a,$e0
+                or      a,b
+                ld      b,$16
+                call    IDE_Setreg      ; ins DEV/Head-Register
+                ld      a,(ix+4)        ; Sektoren/Spur
+                ld      b,$12
+                call    IDE_Setreg
+                ld      a,$91
+                ld      b,$17
+                call    IDE_Setreg      ; ins Sektorcount-Register
+                call    IDE_Wait_Rdy
+                jp      HDD_OK
 
 ; ***************************************************************
 ; Sektor-ID lesen (Fake-Funktion)
