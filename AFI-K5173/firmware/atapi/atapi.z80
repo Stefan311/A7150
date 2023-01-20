@@ -1,0 +1,583 @@
+; Copyright (c) 2023, Stefan Berndt
+;
+; All rights reserved.
+;
+; Redistribution and use in source and binary forms, with or without 
+; modification, are permitted provided that the following conditions are met:
+; 1. Redistributions of source code must retain the above copyright notice, 
+;    this list of conditions and the following disclaimer.
+; 2. Redistributions in binary form must reproduce the above copyright notice, 
+;    this list of conditions and the following disclaimer in the documentation 
+;    and/or other materials provided with the distribution.
+;
+; THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" 
+; AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE 
+; IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE 
+; ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE 
+; LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR 
+; CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF 
+; SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS 
+; INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN 
+; CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) 
+; ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF 
+; THE POSSIBILITY OF SUCH DAMAGE.
+
+
+; *********  Firmware fuer IDE-Kontroller AFI-K5173   ***********
+; HINWEIS: das ist eine sehr fruehe Alpha-Version 
+; Version: 0.1
+; Features:
+; - Schalterstellungen: 0=MFM, 1=Primary ATAPI, 2=Secundary ATAPI
+; - Spezial-Firmware fuer ATAPI-Diskettenlaufwerke wie Iomega ZIP100 (Atapi), Iomega ZIP250 (Atapi) oder LS120.
+; - NICHT fuer IDE-Festplatten
+; - NICHT fuer CD-ROM-Laufwerke
+; - Datentransfer mit Z80-DMA in den KES-Buffer
+; - bisher nur mit Iomega ZIP100 Atapi getestet
+;
+; Version Log:
+; V0.1
+; Basisversion, basierend auf ide V0.4
+
+
+; ***************************************************************
+; Parameter von und zur KES
+FUNKTIONSCODE   equ     $3b2e+11
+LAUFWERKNR      equ     $3b2e+10
+CYLINDER        equ     $3b2e+14
+HEAD            equ     $3b2e+16
+SECTOR          equ     $3b2e+17        ; werden bei KES-Festplatte von 0 gezaehlt!
+BYTECOUNT       equ     $3b2e+4
+BUFFER          equ     $3b2e+6
+ERRORREG        equ     $3b22
+
+; Speicher fuer AFI
+MLBA1           equ     $3a00           ; 48bit=6byte
+MSECCOUNT       equ     $3a06
+MIDE_STEUER     equ     $3a07           ; 8bit: Kopie des Steuer-Registers, $80=LED2, $40=LED1, $20=Reset, $10=SEL1, $08=Sel0, $04=A2, $02=A1, $01=A0
+MIDE_DEVICE     equ     $3a08           ; 8bit: 0=Primary(Master)  $10=Secondary(Slave)
+MLBA2           equ     $3a09           ; 48bit=6byte
+MHEADCT         equ     $3a10           ; Anzahl Koepfe
+MSECTORCT       equ     $3a11           ; Anzahl Sektoren pro Spur
+MCYLINDERCT     equ     $3a12           ; Anzahl Zylinder
+MRETRYCOUNT     equ     $3a14           ; Zaehler Anzahl Wiederholungen
+MDMA_PARAM      equ     $3a40           ; 21 bytes, Kopie von dma_param_st
+MBUFFER         equ     $3a42           ; Addresse Sektorbuffer, liegt mit Absicht mittem in den DMA-Parametern
+MDMA_DIR        equ     $3a52           ; Transfer-Richtung, liegt mit Absicht mittem in den DMA-Parametern
+
+; IO-Register
+REG_DATA        equ     $B0             ; IO-Port IDE-Daten (Lesen und Schreiben)
+REG_STEUER      equ     $B1             ; IO-Port Steuerregister (Schreiben)
+REG_SWITCH      equ     $B1             ; IO-Port Steuerregister (Lesen)
+REG_RESET       equ     $B2             ; IO-Port 16Bit-Toggler Reset (Lesen)
+
+
+; Einsprungpunkte von KES-Firmware
+                org     $5000
+                jp      Chan2           ; Einsprungpunkt von KES-Firmware, wird ausgeloest wenn im Host-System $01 auf Port $1B geschrieben wird
+                jp      Reset           ; Einsprungpunkt von KES-Firmware, aufgerufen einmal beim Reset der KES
+                jp      Cyclic          ; Einsprungpunkt von KES-Firmware, wird zyklisch aufgerufen
+
+
+; ***************************************************************
+; KES-Reset-Routine
+Reset:          in      a,(REG_SWITCH)  ; Betriebsarten-Schalter
+                and     a,$f0
+                ret     z               ; bei Schalter "0" die AFI nicht initialisieren, fuer Debug hilfreich
+
+                ld      a,$18           ; IDE-Reset Signal
+                out     (REG_STEUER),a
+                ld      b,100
+Reset_1:        djnz    Reset_1
+                ld      a,$38
+                out     (REG_STEUER),a
+                ld      (MIDE_STEUER),a
+
+                in      a,(REG_SWITCH)  ; Betriebsarten-Schalter
+                and     a,$f0
+
+                cp      a,$10           ; Schalter "1"
+                jr      nz,Reset_2
+                ld      a,0             ; primary IDE
+                ld      (MIDE_DEVICE),a
+                ld      hl,HDDService   
+                ld      ($3b6b),hl      ; Jump-Vector HDD Service
+                ret
+
+Reset_2:        cp      a,$20           ; Schalter "2"
+                jr      nz,Reset_3
+                ld      a,$10           ; secundary IDE
+                ld      (MIDE_DEVICE),a
+                ld      hl,HDDService   
+                ld      ($3b6b),hl      ; Jump-Vector HDD Service
+                ret
+
+Reset_3:        ret
+
+; ***************************************************************
+Chan2:          scf                     ; Carry gesetzt heisst kein Fertig-Interrupt im Hostsystem ausloesen
+                ret
+
+; ***************************************************************
+; Wird zyklisch aufgerufen
+Cyclic:         xor     a
+                ret
+
+
+; ***************************************************************
+; Service-Routine fuer Festplattenzugriffe
+HDDService:     ld      a,(LAUFWERKNR)
+                cp      a,1
+                jp      nz,HDDService_0
+
+                ld      a,0
+                ld      (LAUFWERKNR),a
+                jp      $1000
+
+HDDService_0:   ld      a,(FUNKTIONSCODE)
+                cp      a,0             ; Init?
+                jr      z,HDD_Init
+                cp      a,2             ; Format?
+                jr      z,HDD_OK
+                cp      a,3             ; Sektor-Id lesen?
+                jp      z,HDD_SektorId
+                cp      a,4             ; Lesen Host?
+                jp      z,HDD_Transfer
+                cp      a,5             ; Lesen Kes?
+                jp      z,HDD_Transfer
+                cp      a,6             ; Schreiben Host?
+                jp      z,HDD_Transfer
+                cp      a,7             ; Schreiben Kes?
+                jp      z,HDD_Transfer
+                cp      a,8             ; Seek?
+                jr      z,HDD_OK
+                cp      a,15            ; Diagnostik?
+                jr      z,HDD_OK
+                ld      bc,$0800        ; alle anderen Funktionen: Errorcode: Parameterfehler
+                jp      HDD_Ende
+
+HDD_OK:         ld      bc,0            ; Errorcode: kein Fehler
+                jp      HDD_Ende
+                
+
+; ***************************************************************
+; HDD Initialisieren
+HDD_Init:       ld      hl,dma_param_st
+                ld      de,MDMA_PARAM
+                ld      bc,dma_param_en-dma_param_st
+                ldir
+
+                ld      ix,(BUFFER)     ; Festplattenparameter sichern
+                ld      a,(ix+0)
+                ld      (MCYLINDERCT),a
+                ld      a,(ix+1)
+                ld      (MCYLINDERCT+1),a
+                ld      a,(ix+2)
+                ld      (MHEADCT),a
+                ld      a,(ix+4)
+                ld      (MSECTORCT),a
+
+                ld      hl,0            ; Gibt dem Laufwerk etwas Zeit fuer Reset bei Boot
+HDD_Init_1:     dec     l
+                jr      nz,HDD_Init_1
+                dec     h
+                jr      nz,HDD_Init_1
+                jr      HDD_OK
+
+; ***************************************************************
+; Sektor-ID lesen (Fake-Funktion)
+HDD_SektorId:   ld      de,(BUFFER)
+                ld      hl,HDD_FakeID
+                ld      bc,5
+                ldir
+                jr      HDD_OK
+
+HDD_FakeID:     dw      0               ; Zylinder
+                db      0               ; Head
+                db      1               ; Sektor
+                db      $20             ; Flags: normaler Sektor, 512 bytes
+
+
+; ***************************************************************
+; Disk lesen oder schreiben
+HDD_Transfer:   ld      hl,(CYLINDER)   ; Start-CHS muss im ERROR-Register zurueckgegeben werden
+                ld      (ERRORREG+3),hl
+                ld      hl,(HEAD)       ; das ist auch noch +SEKTOR
+                ld      (ERRORREG+5),hl
+
+                ld      hl,(BUFFER)     ; Start-Buffer-Pointer privat speichern, im KES-Parameter-Block soll nicht geaendert werden
+                ld      (MBUFFER),hl
+                ld      a,(BYTECOUNT+1) ; High-Byte Bytecounter
+                sra     a               ; /2, damit haben wir den 512-Byte-Block-Counter
+                ld      (MSECCOUNT),a 
+                jr      nz,HDD_Trans_0  ; Leseversuche mit einzelnen 128-Byte Sektoren gibt hier 0 Sektoren
+                ld      bc,$1000        ; wir machen nur 512-Byte-Sektoren, also: Errorcode: Sektor nicht gefunden
+                jr      HDD_Ende
+
+HDD_Trans_0:    call    CHS2LBA
+                ld      a,(MIDE_DEVICE)
+                ld      b,$16
+                call    IDE_Setreg
+
+                ld      a,(FUNKTIONSCODE)
+                bit     1,a             ; lesen oder schreiben?
+                jr      z,HDD_Trans_1
+
+; ***************************************************************
+; DISK schreiben
+                ld      a,(MIDE_STEUER)
+                or      a,$80           ; LED 2 an
+                ld      (MIDE_STEUER),a
+                ld      a,$0a           ; SCSI WRITE(6) Kommando
+                call    Send_SCSI
+                jr      nc,HDD_Ende     ; Fehler!
+                call    IDE_Wait4Data
+                jr      nc,HDD_Ende     ; Fehler!
+                ld      b,$05           ; DMA Richtung: B-->A
+                call    IDE_DMA
+                jr      nc,HDD_Ende     ; Fehler!
+                call    IDE_Wait_Rdy
+                jr      nc,HDD_Ende     ; Fehler!
+                jr      HDD_Trans_5
+
+; ***************************************************************
+; DISK lesen
+HDD_Trans_1:    ld      a,(MIDE_STEUER)
+                or      a,$40           ; LED 1 an
+                ld      (MIDE_STEUER),a
+                ld      a,5
+                ld      (MRETRYCOUNT),a
+
+HDD_Trans_2:    ld      a,$08           ; SCSI READ(6) Kommando
+                call    Send_SCSI
+                jr      nc,HDD_Trans_3  ; Fehler!
+                call    IDE_Wait4Data
+                jr      c,HDD_Trans_4
+
+HDD_Trans_3:    ld      a,(MRETRYCOUNT) ; nach Laufwerks-Reset zickt das ZIP100 oft
+                dec     a               ; bei der Annahme des SCSI-Kommandos rum.
+                ld      (MRETRYCOUNT),a ; bis zu 5x wiederholen
+                jr      nz,HDD_Trans_2
+                ld      bc,$1000
+                jr      HDD_Ende
+
+HDD_Trans_4:    ld      b,$01           ; DMA Richtung: A-->B
+                call    IDE_DMA
+                jr      nc,HDD_Ende     ; Fehler!
+
+HDD_Trans_5:    call    AddCHS
+                ld      bc,0            ; Errorcode: kein Fehler
+            
+; ***************************************************************
+; Errorcode (bc) schreiben und Ende
+HDD_Ende:       ld      a,(MIDE_STEUER)
+                and     a,$3f           ; LEDs aus
+                ld      (MIDE_STEUER),a
+                out     (REG_STEUER),a
+
+                ld      (ERRORREG),bc
+                ld      a,0
+                ld      (ERRORREG+2),a
+                ld      hl,(CYLINDER)
+                ld      (ERRORREG+7),hl
+                ld      hl,(HEAD)
+                ld      (ERRORREG+9),hl
+                ld      a,b
+                or      a,c             ; Zero-Flagg=1 heisst fehlerfrei
+                ret
+
+; ***************************************************************
+; Warten bis die Platte die Bereitschaft zur Datenuebertragung meldet
+; Error wenn Carry=0
+IDE_Wait4Data:  ld      a,(MIDE_STEUER)
+                and     a,$E0
+                or      a,$17
+                out     (REG_STEUER),a
+                ld      b,5
+IDE_Wait4Data0: ld      d,b
+                ld      b,0
+IDE_Wait4Data1: ld      c,b
+                ld      b,0
+IDE_Wait4Data2: in      a,(REG_RESET)
+                in      a,(REG_DATA)
+                bit     0,a
+                jr      nz,IDE_Wait4Data4
+                bit     3,a
+                scf
+                ret     nz
+                djnz    IDE_Wait4Data2
+                ld      b,c
+                djnz    IDE_Wait4Data1
+                ld      b,d
+                djnz    IDE_Wait4Data0
+IDE_Wait4Data4: ld      bc,$1000
+                scf
+                ccf
+                ret
+
+; ***************************************************************
+; Warten bis die Platte die Beendigung der Operation meldet
+; Error wenn Carry=0
+IDE_Wait_Rdy:   ld      a,(MIDE_STEUER)
+                and     a,$E0
+                or      a,$17
+                out     (REG_STEUER),a
+                ld      b,0
+IDE_Wait_Rdy_0: ld      c,b
+                ld      b,0
+IDE_Wait_Rdy_1: in      a,(REG_RESET)
+                in      a,(REG_DATA)
+                bit     7,a
+                scf
+                ret     z
+                bit     0,a
+                jr      nz,IDE_Wait_Rdy_2
+                djnz    IDE_Wait_Rdy_1
+                ld      b,c
+                djnz    IDE_Wait_Rdy_0
+IDE_Wait_Rdy_2: ld      bc,$1000
+                scf
+                ccf
+                ret
+
+
+; ***************************************************************
+; Setze einzelnes IDE-Register (a)-->Register(b) 
+IDE_Setreg:     push    bc
+                ld      c,a
+                ld      a,(MIDE_STEUER)
+                and     a,$E0
+                or      a,b
+                out     (REG_STEUER),a
+                in      a,(REG_RESET)
+                ld      a,c
+                out     (REG_DATA),a
+                ld      a,0
+                out     (REG_DATA),a
+                pop     bc
+                ret
+
+
+; ***************************************************************
+; Holt einzelnes IDE-Register Register(c) --> a
+IDE_Getreg:     ld      a,(MIDE_STEUER)
+                and     a,$E0
+                or      a,c
+                out     (REG_STEUER),a
+                in      a,(REG_RESET)
+                in      a,(REG_DATA)
+                ret
+
+
+; ***************************************************************
+; DMA-Transfer
+IDE_DMA:        ld      a,(MIDE_STEUER)
+                and     a,$E0
+                or      a,$30
+                out     (REG_STEUER),a  ; Daten-Register anwaehlen
+                in      a,(REG_RESET)
+                ld      a,b
+                ld      (MDMA_DIR),a    ; direkt in die DMA-Parameter speichern
+                ld	    c,0             ; DMA-Controller Port
+                ld      hl,MDMA_PARAM   ; Addresse DMA-Paramter
+                ld      b,dma_param_en-dma_param_st    ; Anzahl DMA-Parameter
+                otir
+IDE_DMA_1:      ld      a,(MSECCOUNT)
+                dec     a
+                ld      (MSECCOUNT),a   ; Sektor-Anzahl runterzaehlen
+                scf
+                ret     z               ; bei Sektor 0: Ende
+                call    IDE_Wait4Data
+                ret     nc              ; Fehler !
+                ld      a,(MIDE_STEUER)
+                and     a,$E0
+                or      a,$30
+                out     (REG_STEUER),a  ; wieder Daten-Register anwaehlen
+                in      a,(REG_RESET)
+                ld      a,$83           ; DMA-Kommando: Stop
+                out     (0),a
+                ld      a,$D3           ; DMA-Kommando: Continue (resettet den Bytecounter)
+                out     (0),a
+                ld      a,$87           ; DMA-Kommando: Start
+                out     (0),a
+                jr      IDE_DMA_1
+
+
+; ***************************************************************
+; Kurzes SCSI/ATAPI-Kommando senden
+Send_SCSI:      ld      e,a
+                ld      a,$a0           ; IDE Block (ATAPI/SCSI) Kommando 
+                ld      b,$17           ; IDE Kommandoregister
+                call    IDE_Setreg
+                ld      b,0
+Send_SCSI_1:    ld      c,$17           ; IDE Statusregister
+                call    IDE_Getreg
+                bit     3,a             ; bereit fuer Daten?
+                jr      nz,Send_SCSI_2
+                djnz    Send_SCSI_1
+                xor     a,a             ; timeout: carry loeschen
+                ret
+Send_SCSI_2:    ld      a,(MIDE_STEUER) ; IDE-Datenregister anwaehlen
+                and     a,$E0
+                or      a,$10
+                out     (REG_STEUER),a
+                in      a,(REG_RESET)
+                ld      a,e
+                out     (REG_DATA),a    ; SCSI Kommando
+                ld      a,(MLBA1+2)
+                and     a,$1f
+                out     (REG_DATA),a    ; bei LBA Byte 3
+                ld      a,(MLBA1+1)
+                out     (REG_DATA),a    ; bei LBA Byte 2
+                ld      a,(MLBA1)
+                out     (REG_DATA),a    ; bei LBA Byte 1
+                ld      a,(MSECCOUNT)
+                out     (REG_DATA),a    ; bei Anzahl Sektoren
+                ld      a,0
+                ld      b,7
+Send_SCSI_3:    out     (REG_DATA),a    ; mit 0-Bytes auffuellen
+                djnz    Send_SCSI_3
+                scf
+                ret
+
+
+; ***************************************************************
+; CHS in LBA umrechnen: LBA1=(CYLINDER*HEADCT+HEAD)*SECTORCT+SECTOR
+CHS2LBA:        ld      a,(MHEADCT)      ; Cylinder * HEADCT
+                ld      de,(CYLINDER)
+                ld      b,8
+                ld      c,0
+                ld      hl,0
+Mul_16bX8b_0:   sla     l
+                rl      h
+                rl      c
+                sla     a
+                jr      nc,Mul_16bX8b_1
+                add     hl,de
+                jr      nc,Mul_16bX8b_1
+                inc     c
+Mul_16bX8b_1:   djnz    Mul_16bX8b_0
+
+                ld      a,(HEAD)        ; + HEAD
+                ld      e,a
+                ld      d,0
+                add     hl,de
+                jr      nc,Add_32b_0
+                inc     bc
+Add_32b_0:      ld      (MLBA2),hl
+                ld      (MLBA2+2),bc
+
+                ld      a,(MSECTORCT)   ; * SECTORCT
+                ld      b,8
+                ld      hl,0
+                ld      (MLBA1),hl
+                ld      (MLBA1+2),hl
+                ld      (MLBA1+4),hl
+                ld      (MLBA2+4),hl
+
+Mul_48bX8b_0:   ld      c,b
+                ld      hl,MLBA1
+                ld      b,6
+                scf
+                ccf
+Mul_48bX8b_2:   rl      (hl)
+                inc     hl
+                djnz    Mul_48bX8b_2
+
+                sla     a
+                jr      nc,Mul_48bX8b_1
+
+                ld      de,(MLBA2)
+                ld      hl,(MLBA1)
+                add     hl,de
+                ld      (MLBA1),hl
+                ld      de,(MLBA2+2)
+                ld      hl,(MLBA1+2)
+                adc     hl,de
+                ld      (MLBA1+2),hl
+                ld      de,(MLBA2+4)
+                ld      hl,(MLBA1+4)
+                adc     hl,de
+                ld      (MLBA1+4),hl
+
+Mul_48bX8b_1:   ld      b,c
+                djnz    Mul_48bX8b_0
+
+                ld      a,(SECTOR)      ; + SECTOR
+                ld      hl,MLBA1
+                add     a,(hl)
+                ld      (hl),a
+                ret     nc
+                ld      b,5
+Add_48b_1:      inc     hl
+                inc     (hl)
+                ret     nz
+                djnz	Add_48b_1
+                ret
+
+
+; ***************************************************************
+; CHS um die Anzahl der Sektoren erhoehen
+AddCHS:         ld      a,(SECTOR)
+                ld      b,a
+                ld      a,(MSECTORCT)
+                ld      c,a
+                ld      a,(BYTECOUNT+1)
+                sra     a
+                add     a,b
+                ld      (SECTOR),a
+                sub     a,c
+                ret     c
+                ld      (SECTOR),a
+                ld      a,(HEAD)
+                inc     a
+                ld      (HEAD),a
+                ld      b,a
+                ld      a,(MHEADCT)
+                cp      a,b
+                ret     nz
+                ld      a,0
+                ld      (HEAD),a
+                ld      hl,(CYLINDER)
+                inc     hl
+                ld      (CYLINDER),hl
+                ret
+
+
+; ***************************************************************
+; Z80-DMA Parameter
+dma_param_st:   db      $C3             ; Reset
+                db      $79             ; Transfer B-->A
+                dw      $2100           ; Port A Addresse
+                dw      $1ff            ; Block Laenge-1
+                db      $54             ; Port A Memory, Increasing
+                db      $4E             ; Port A: 2 Cycle, voll IORQ, voll MREQ, voll RD, halb WR
+                db      $68             ; Port B IO, Fixed
+                db      $4E             ; Port B: 2 Cycle, voll IORQ, voll MREQ, voll RD, halb WR
+                db      $80             ; no INT, no STOP
+                db      $BD             ; Conti Mode
+                db      REG_DATA        ; Port Low
+                db      $00             ; Port High
+                db      $12             ; Interrupt am Ende
+                db      $10             ; Interropt Vektor
+                db      $82             ; READY active High
+                db      $CF             ; Load Command
+dma_dir:        db      $01             ; Transfer direction
+                db      $CF             ; Load
+                db      $87             ; Start DMA
+dma_param_en:   db      0
+
+
+; ***************************************************************
+                org     $57fc
+                db      $10             ; Version 1.0
+                db      $51             ; ROM-Kennung: Custom Messplatine Teil 1
+                dw      0               ; CRC, diese wird spaeter mit dem CRCTOOL berechnet
+
+
+; ***************************************************************
+                org     $5ffc
+                db      $10             ; Version 1.0
+                db      $52             ; ROM-Kennung: Custom Messplatine Teil 2
+                dw      0               ; CRC, diese wird spaeter mit dem CRCTOOL berechnet
+
+
