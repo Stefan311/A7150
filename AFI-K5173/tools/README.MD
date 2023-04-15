@@ -31,7 +31,7 @@ Ermöglicht das Einstellen der Festplattengeometrie über die Begrenzungen des M
 
 ### Festplatten-Kopier-Tool (CLONEHDD)
 Ermöglicht das kopieren ganzer Festplatten. (MFM-->IDE, IDE-->MFM, IDE-->IDE)
-# Hinweise dazu:
+Hinweise dazu:
 + Beim Kopieren von MFM nach IDE-CHS und beim kopieren von IDE nach MFM muss die Quellplatte von den Parametern her in die Zielplatte passen. Sprich: die Zielplatte muss mehr oder gleich viele Köpfe, und mehr oder gleich viel Zylinder haben. Sektoren sind immer 17. Überzählige Zylinder, Köpfe und Sektoren bleiben ungenutzt. Wenn die Zielplatte eine IDE-Platte im LBA-Modus ist, dann brauchen diese Parameter nicht beachtet zu werden.
 + Festplatten, die nicht mit MWINCH eingerichtet worden sind, werden möglicherweise mit falschen Parametern angezeigt, z.B. C:0 H:0 S:17. Als Ziel beim kopieren gehen die trotzdem.
 + Es wird kein Verify gemacht. 

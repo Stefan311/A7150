@@ -82,6 +82,36 @@ Zum weiteren Testen wird das AFITEST in den IDE-Testmodus versetzt: `d`
 Zum Basis-Testmodus kann man mit `x` zurückkehren
 
 ---
+### USB-Board
+Sollte der Kontroller mit einer USB-Platine bestückt sein, so kann diese auch getestet werden
+
+Als erstes wird das AFITEST in den USB-Testmodus versetzt: `u`
+
+Dann den USB-Kontroller resetten: `c 05`
+
+Echo-Test:
+- `c 06`
+- `o 01`
+- `i` 
+Als Antwort müsste nun die Zahl von oben negiert, also 'FE' kommen. Das kann man ruhig mit anderen Zahlen probieren.
+- `c 06`  `o 0f'  `i` Ergebnis: 'F0'
+- `c 06`  `o f8`  `i` Ergebnis: '07'
+
+Einstellung Kontroller-Modus:
+- `c 15`
+- `o 06`
+06 ist der Modus als USB-Host mit automatischem Erzeugen von SOF Packages. Fragt mich nicht, was das heißt - ich weiß es auch nicht. So steht es im Datenblatt des CH375B.
+Nur in diesem Modus lässt sich die Verbindung mit USB-Sticks einfach testen.
+
+Mit `s` können wir den Status abfragen. Solange kein USB-Stick angesteckt ist, sollte das '16(USB_INT_DISCONNECT)' sein.
+
+Stecken wir einen USB-Stick an, dann sollte der Status zu '15(USB_INT_CONNECT)' wechseln.
+
+Mit `c 51`kann nun der USB-Stick am Kontroller angemeldet werden. Der Status sollte dann zu '14(USB_INT_SUCCESS)' wechseln. Der USB-Stick wäre nun theoretisch für Lese,-und Schreibkommandos bereit.
+
+Die Eingabeaufforderung 'Int>' signalisiert, dass der CH375B die Interrupt-Leitung gesetzt hat. Das sollte nach Abfrage des Status wieder weg gehen.
+
+---
 ### Firmware-Flashrom testen
 Wer ein Flashrom mit bekanntem Inhalt hat, der kann dieses zum Testen nutzen. Ich gehe mal davon aus dass ihr für das Flashrom einen IC-Sockel verwendet.
 - Byte aus Flashrom lesen (Firmware-Bereich): `r 5000` sollte das erste Byte ausgeben, `r 5001` das zweite usw. 

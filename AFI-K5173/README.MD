@@ -7,9 +7,16 @@ AFI ist einen Platine, mit dem IDE-Festplatten an das Datenträger-Subsystem des
 * Firmware Flashrom im System beschreibbar
 * Iomega ZIP100 Atapi Laufwerke als Festplatte nutzbar
 
+### Welche Features sind in Vorbereitung?
+* Unterstützung Arduino-USB-Board auf Basis vom CH375B zur Verwendung von USB-Sticks
+* Firmware mit DMA-Übertragung direkt in den Host-Speicher für höhere Übertragungsrate
+* Firmware "All in One"
+
 ### Teile des Projekts:
 
-[Schaltung und PCB Layout in KiCad](schaltplan/)
+[Schaltung und PCB Layout in KiCad und PDF](schaltplan/)
+
+[Materialliste](schaltplan/V1/Materialliste.txt)
 
 [Firmware](firmware/)
 

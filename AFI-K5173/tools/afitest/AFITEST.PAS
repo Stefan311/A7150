@@ -35,7 +35,7 @@ var
   ad: word;
   va: byte;
   endless: boolean;
-  a,b: word;
+  a,b,c: word;
   f:file;
 
 function upper(ip:string):string;
@@ -147,6 +147,24 @@ begin
   IDEIn:=x+(y shl 8);
 end;
 
+procedure USBCmd(c:byte);
+begin
+  KOut($B1,$31);
+  KOut($B3,c);
+end;
+
+procedure USBOut(c:byte);
+begin
+  KOut($B1,$30);
+  KOut($B3,c);
+end;
+
+function USBIn: byte;
+begin
+  KOut($B1,$30);
+  USBIn:=KIn($B3);
+end;
+
 {$I kesprog.inc}
 
 procedure basefunct;
@@ -158,6 +176,7 @@ begin
   writeln('I xx      - Port lesen');
   writeln('O xx xx   - Port schreiben');
   writeln('D         - IDEtest Modus');
+  writeln('U         - USBtest Modus');
   writeln('Q         - Beenden');
   cmd:=0;
 
@@ -222,6 +241,10 @@ begin
                  cmd:=102;
                  ok:=false;
                end;
+          'U': begin
+                 cmd:=103;
+                 ok:=false;
+               end;
           'Q': begin
                  cmd:=100;
                  ok:=false;
@@ -268,7 +291,7 @@ begin
   writeln('BRD datei - Block lesen mit Z80-DMA');
   writeln('BWD datei - Block schreiben mit Z80-DMA');
   writeln('(Block lesen ohne Dateiname gibt auf Bildschirm aus.)');
-  writeln('(Block schrieben ohne Dateiname benutzt ein Testpattern.)');
+  writeln('(Block schreiben ohne Dateiname benutzt ein Testpattern.)');
   writeln('X         - Basistest-Modus');
   writeln('Q         - Beenden');
   cmd:=0;
@@ -391,6 +414,156 @@ begin
   until cmd>50;
 end;
 
+procedure usbfunct;
+begin
+  writeln('**** USBtest-Modus ****');
+  writeln('C XX      - Kommando senden');
+  writeln('O XX (XX) - Daten senden (mehrere Bytes moeglich)');
+  writeln('I (XX)    - Daten empfangen (XX ist Anzahl Bytes wenn angegeben)');
+  writeln('S         - Status lesen');
+  writeln('BR datei  - Block lesen');
+  writeln('BW datei  - Block schreiben (64 Bytes)');
+  writeln('(Block lesen ohne Dateiname gibt auf Bildschirm aus.)');
+  writeln('(Block schreiben ohne Dateiname benutzt ein Testpattern.)');
+  writeln('X         - Basistest-Modus');
+  writeln('Q         - Beenden');
+  cmd:=0;
+  repeat
+    if (KIn($B1) and $08) = 0 then 
+	  write('Int');
+    write('>');
+    readln(s);
+    s:=upper(s);
+    ok:=true;
+    case s[1] of
+      'C': begin
+             if length(s)<4 then
+               begin
+                 writeln('Parameter zu kurz');
+                 continue;
+               end;
+             a:=HTB(copy(s,3,2));
+             USBCmd(a);
+             writeln('OK');
+           end;
+      'O': begin
+             if length(s)<4 then
+               begin
+                 writeln('Parameter zu kurz');
+                 continue;
+               end;
+			 a:=3;
+             repeat
+               b:=HTB(copy(s,a,2));
+			   USBOut(b);
+               a:=a+3;
+			 until a>=(length(s)+1);
+             writeln('OK');
+           end;
+      'I': begin
+	         a:=1;
+             if length(s)>=4 then
+               a:=HTB(copy(s,3,2));
+			 for b:=1 to a do
+               write(bth(USBIn)+' ');
+             writeln(#13#10'OK');
+           end; 
+	  'S': begin
+	         USBCmd($22);
+			 a:=USBIn;
+			 t:='Unbekannt';
+			 case a of
+			   $14: t:='USB_INT_SUCCESS';
+			   $15: t:='USB_INT_CONNECT';
+			   $16: t:='USB_INT_DISCONNECT';
+			   $17: t:='USB_INT_BUF_OVER';
+			   $1D: t:='USB_DISK_READ';
+			   $1E: t:='USB_DISK_WRITE';
+			   $1F: t:='USB_DISK_ERROR';
+			 end;
+             writeln('Status: '+bth(a)+'('+t+')');
+             writeln('OK');
+		   end;
+	   'B': begin
+             Kes_Buffer_Clear;
+             if s[2]='W' then
+               begin
+                 if length(s)>3 then
+                   begin
+                     assign(f,copy(s,5,length(s)-4));
+                     reset(f,1);
+                     blockread(f,kes_data[0],64);
+                     close(f);
+                   end
+                 else
+                   begin
+                     for a:=0 to 31 do
+                       begin
+                         kes_data[a*2]:=a;
+                         if (a and 1) = 0 then
+                           kes_data[a*2+1]:=$55
+                         else
+                           kes_data[a*2+1]:=$AA;
+                       end;
+                   end;
+				 USBCmd($2B);
+				 USBOut(64);
+                 for a:=0 to 63 do
+                   USBOut(kes_data[a]);
+               end
+			 else
+			   begin
+				 USBCmd($28);
+				 b:=USBIn;
+				 if b=0 then
+				   begin
+				     writeln('Keine Daten!');
+				     continue;
+				   end;
+                 for a:=0 to b do
+                   kes_data[a]:=USBIn;
+                 if length(s)>3 then
+                   begin
+                     assign(f,copy(s,5,length(s)-4));
+                     rewrite(f,1);
+                     blockwrite(f,kes_data[0],b);
+                     close(f);
+                   end
+                 else
+                   begin
+                     for a:=0 to b-1 do 
+                       begin
+                         if (a and 15=0) then 
+                           begin
+                             write(wth(a));
+                             write(': ');
+                           end;
+                         write(bth(kes_data[a]));
+                         if (a and 15=15) then 
+                           begin
+                             write(' ');
+                             for c:=0 to 15 do
+                               begin
+                                 va:=kes_data[(a and $fff0) + c];
+                                 if va<32 then write('.') else write(chr(va));
+                               end;
+                             writeln;
+                           end
+                         else
+                           write(' ');
+                       end;
+                     writeln;
+                   end;
+			   end;
+             writeln('OK');
+           end; 
+      'X': cmd:=101;
+      '?': cmd:=103;
+      'Q': cmd:=100;   
+    end;
+  until cmd>50;
+end;
+
 begin
   Kes_Init;
   Kes_Buffer_Clear;
@@ -404,6 +577,7 @@ begin
   repeat
     if cmd=101 then basefunct;
     if cmd=102 then diskfunct;
+    if cmd=103 then usbfunct;
   until cmd=100;
 end.
 

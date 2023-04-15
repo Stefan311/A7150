@@ -40,7 +40,7 @@ Features:
 + IDE-Adressmodus: CHS
 + Datentransfer mit Z80-DMA in den KES-Buffer
 
-
+---
 [Iomega ZIP100 Atapi:](atapi/)
 
 Spezial-Firmware fuer ATAPI-Diskettenlaufwerke Iomega ZIP100 (Atapi)
