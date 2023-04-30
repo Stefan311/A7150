@@ -1,25 +1,25 @@
-Bezeichnung		Typ				Anzahl	IDE	USB		Bestellnummer_Reichelt	Preis
-U1,U2,U3,U4		74HCT573		4		x			74HCT 573				0,60
-U5,U6,U8		74HCT573		3		x	x		74HCT 573				0,60
-U7				74HTC640		1		x	x		74HC 640				1,99			
-U9				SST39SF040		1		x	x		39SF04070-4C-P			4,70
-U10,U11,U12		74HCT04			3		x	x		74HCT 04				0,40
-U13				74HCT04			1		x			74HCT 04				0,40
-U14				74HCT32			1		x	x		74HCT 32				0,64			
-U15,U20			74HCT138		2		x	x		74HCT 138				0,63			
-U16				74HCT08			1		x	x		74HCT 08				0,53			
-U17,U18			74HCT20			2		x	x		74HC 20					0,29			
-U19				74HCT74			1		x			74HCT 74				0,43			
-C1-C11			100nF			11		x	x
-JP1,JP2			1x3 Pin			2		x	x		MPE 087-1-003			0,08			
-R1,R2			560ohm			2		x	x
-J2				2x20 Pin		1		x			3M 46406000				0,31
-J3				2x5 Pin			1		x			MPE 088-2-010			0,66
-RN1,RN4			5,6K x 8		2		x	x		SIL 9-8 5,6K			0,34
-RN2,RN3			5,6K x 8		2		x			SIL 9-8 5,6K			0,34
-J4				2x8 Buchse		1			x		BKL 10120808			0,76
-J1				DIN41612 3x32	1		x	x		HAN 03 196 7921			2,75			
-		CH375B USB Platine		1			x		ARD U DISK RW			6,99
+Bezeichnung		Typ			Anzahl	IDE	USB		Bestellnummer_Reichelt	Preis
+U1,U2,U3,U4		74HCT573		4	x			74HCT 573		0,60
+U5,U6,U8		74HCT573		3	x	x		74HCT 573		0,60
+U7			74HTC640		1	x	x		74HC 640		1,99			
+U9			SST39SF040		1	x	x		39SF04070-4C-P		4,70
+U10,U11,U12		74HCT04			3	x	x		74HCT 04		0,40
+U13			74HCT04			1	x			74HCT 04		0,40
+U14			74HCT32			1	x	x		74HCT 32		0,64			
+U15,U20			74HCT138		2	x	x		74HCT 138		0,63			
+U16			74HCT08			1	x	x		74HCT 08		0,53			
+U17,U18			74HCT20			2	x	x		74HC 20			0,29			
+U19			74HCT74			1	x			74HCT 74		0,43			
+C1-C11			100nF			11	x	x
+JP1,JP2			1x3 Pin			2	x	x		MPE 087-1-003		0,08			
+R1,R2			560ohm			2	x	x
+J2			2x20 Pin		1	x			3M 46406000		0,31
+J3			2x5 Pin			1	x			MPE 088-2-010		0,66
+RN1,RN4			5,6K x 8		2	x	x		SIL 9-8 5,6K		0,34
+RN2,RN3			5,6K x 8		2	x			SIL 9-8 5,6K		0,34
+J4			2x8 Buchse		1		x		BKL 10120808		0,76
+J1			DIN41612 3x32		1	x	x		HAN 03 196 7921		2,75			
+		CH375B USB Platine		1		x		ARD U DISK RW		6,99
 									
 Die TTL-IC's sollten vorzugsweise aus der HCT-Serie sein. HC entspricht nicht der Spezifikation, funktioniert aber auch.
 Zur Not gehen auch LS-Typen. Bei Verwendung von LS-IC's muss gegebenenfalls der Wert der Pull-Down Widerstände RN1-RN4 angepasst werden.
