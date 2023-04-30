@@ -39,6 +39,7 @@ Features:
 + Schalterstellungen: 0=MFM, 1=Primary IDE, 2=Secundary IDE
 + IDE-Adressmodus: CHS
 + Datentransfer mit Z80-DMA in den KES-Buffer
++ Kanal B-Support für die CH375 USB-Platine
 
 ---
 [Iomega ZIP100 Atapi:](atapi/)

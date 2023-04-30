@@ -1,0 +1,1059 @@
+; Copyright (c) 2022, Stefan Berndt
+;
+; All rights reserved.
+;
+; Redistribution and use in source and binary forms, with or without 
+; modification, are permitted provided that the following conditions are met:
+; 1. Redistributions of source code must retain the above copyright notice, 
+;    this list of conditions and the following disclaimer.
+; 2. Redistributions in binary form must reproduce the above copyright notice, 
+;    this list of conditions and the following disclaimer in the documentation 
+;    and/or other materials provided with the distribution.
+;
+; THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" 
+; AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE 
+; IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE 
+; ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE 
+; LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR 
+; CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF 
+; SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS 
+; INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN 
+; CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) 
+; ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF 
+; THE POSSIBILITY OF SUCH DAMAGE.
+
+; Konstanten
+CH2COMMAND      equ     $c4a6           ; Systemspeicher 004A:0006 (Parameter: Kommando)
+CH2REV          equ     $10             ; Revision 1.0
+CH2FuncMask     equ     $1f
+
+; Variablen im KES-RAM
+UDMA_PARAM      equ     $3fd0 ;-3fe6    ; 21 bytes, Kopie von udma_param_st
+USECCOUNT       equ     $3fee ;-3fef    ; Anzahl 64byte-Bloecke
+CH2_AMB1_A      equ     $3ff0           ; 2byte, Alternative Mailbox 1, Mem-Teil
+CH2_AMB1_I      equ     $3ff2           ; 1byte, Alternative Mailbox 1, IO-Teil
+CH2_AMB2_A      equ     $3ff3           ; 2byte, Alternative Mailbox 2, Mem-Teil
+CH2_AMB2_I      equ     $3ff5           ; 1byte, Alternative Mailbox 2, IO-Teil
+CH2_AMB3_A      equ     $3ff6           ; 2byte, Alternative Mailbox 3, Mem-Teil
+CH2_AMB3_I      equ     $3ff8           ; 1byte, Alternative Mailbox 3, IO-Teil
+CH2_CMB_A       equ     $3ff9           ; 2byte, aktuelle Mailbox, Mem-Teil
+CH2_CMB_I       equ     $3ffb           ; 1byte, aktuelle Mailbox, IO-Teil
+MUSB_State      equ     $3ffc
+
+
+HOSTOFS         equ     $3BE3
+HOSTSEG         equ     $3BE2
+
+
+; **********************************************************
+; Reset-Routine fuer Kanal 2
+Chan2Reset:     ld      hl,CH2_AMB1_A
+                ld      a,0
+                ld      b,CH2_CMB_I-CH2_AMB1_A
+Chan2_Res_1:    ld      (hl),a
+                inc     hl
+                djnz    Chan2_Res_1
+                ld      hl,udma_param_st
+                ld      de,UDMA_PARAM
+                ld      bc,udma_param_en-udma_param_st
+                ldir
+                ret
+
+
+; **********************************************************
+; Service-Routine fuer Kanal 2
+Chan2:          xor     a,a
+                ld      (CH2_CMB_I),a
+                ld      iy,CH2COMMAND
+                ld      a,(CH2COMMAND)
+                and     a,CH2FuncMask
+                jr      nz,Chan2_1
+                ld      a,(CH2_AMB1_I)
+                or      a,a
+                jr      z,Chan2_2
+                ld      iy,(CH2_AMB1_A)
+                out     (REG_HOSTSEL),a
+                ld      (CH2_CMB_I),a
+                ld      a,(iy+0)
+                and     a,CH2FuncMask
+                jr      nz,Chan2_1
+Chan2_2:        ld      a,(CH2_AMB2_I)
+                or      a,a
+                jr      z,Chan2_3
+                ld      iy,(CH2_AMB2_A)
+                out     (REG_HOSTSEL),a
+                ld      (CH2_CMB_I),a
+                ld      a,(iy+0)
+                and     a,CH2FuncMask
+                jr      nz,Chan2_1
+Chan2_3:        ld      a,(CH2_AMB3_I)
+                or      a,a
+                jp      z,Ch2_End_N
+                ld      iy,(CH2_AMB2_A)
+                out     (REG_HOSTSEL),a
+                ld      (CH2_CMB_I),a
+                ld      a,(iy+0)
+                and     a,CH2FuncMask
+                
+Chan2_1:        ld      (CH2_CMB_A),iy
+                sla     a
+                ld      c,a
+                ld      b,0
+                ld      ix,Ch2_Jumptable
+                add     ix,bc
+                ld      l,(ix+0)
+                ld      h,(ix+1)
+                jp      (hl)
+Ch2_Jumptable:  dw      Ch2_End_N       ; 0: Sollte nicht vorkommen
+                dw      Ch2_Ping        ; 1: PING / Abfrage Revision
+                dw      Ch2_ReadLBA28   ; 2: Lesen <128GB
+                dw      Ch2_ReadLBA48   ; 3: Lesen
+                dw      Ch2_WriteLBA28  ; 4: Schreiben <128GB
+                dw      Ch2_WriteLBA48  ; 5: Schreiben
+                dw      Ch2_PanelIO     ; 6: Frontpanel
+                dw      Ch2_ReadReg     ; 7: IDE Register lesen
+                dw      Ch2_WriteReg    ; 8: IDE Register schreiben
+                dw      Ch2_ReadData    ; 9: Datenblock lesen
+                dw      Ch2_WriteData   ; 10: Datenblock schreiben
+                dw      Ch2_End_N       ; 11: Dummy
+                dw      Ch2_End_N       ; 12: Dummy
+                dw      Ch2_End_N       ; 13: Dummy
+                dw      Ch2_End_N       ; 14: Dummy
+                dw      Ch2_End_N       ; 15: Dummy
+                dw      Ch2_End_N       ; 16: Dummy
+                dw      Ch2_End_N       ; 17: Dummy
+                dw      Ch2_End_N       ; 18: Dummy
+                dw      Ch2_End_N       ; 19: Dummy
+                dw      Ch2_USB_CMD     ; 20: Kommando an USB senden
+                dw      Ch2_USB_STAT    ; 21: Status von USB holen
+                dw      Ch2_USB_OUT     ; 22: Datenbyte an USB senden
+                dw      Ch2_USB_IN      ; 23: Datenbyte von USB holen
+                dw      Ch2_USB_SEND    ; 24: Datenblock an USB senden
+                dw      Ch2_USB_RECV    ; 25: Datenblock von USB holen
+                dw      Ch2_USB_INIT    ; 26: Disk Lese/Schreib-bereit machen
+                dw      Ch2_End_N       ; 27: Dummy
+                dw      Ch2_End_N       ; 28: Dummy
+                dw      Ch2_End_N       ; 29: Dummy
+                dw      Ch2_Reg_MB      ; 30: Alternative Mailbox registrieren
+                dw      Ch2_Del_MB      ; 31: Alternative Mailbox entfernen
+
+
+; **********************************************************
+; Funktion 1 : Ping / Abfrage Protokollrevision
+Ch2_Ping:       ld      b,CH2REV
+                jp      Ch2_End_N
+
+
+
+; **********************************************************
+; UNFERTIG, UNGETESTET!!!
+; Funktion 2 : Lesen LBA28 / CHS
+Ch2_ReadLBA28:  call    Ch2_CheckRDY
+                jp      nc,Ch2_Error
+                call    Ch2_SetLBA28
+                ld      a,$30
+                ld      b,$17
+                call    IDE_Setreg                
+Ch2_ReadLBA_1:  call    IDE_Wait4Data
+                jp      nc,Ch2_Error
+                ld      b,$01           ; DMA Richtung: A-->B
+                ld      l,(iy+2)
+                ld      h,(iy+3)
+                ld      a,(iy+4)
+                ld      de,512
+                call    Ch2_DMA
+                jp      nc,Ch2_Error
+                ld      a,(iy+1)
+                dec     a
+                ld      (iy+1),a
+                jr      nz,Ch2_ReadLBA_1
+                jp      Ch2_End_I
+
+
+; **********************************************************
+; Funktion 6 : LED's setzen/schalter abfragen
+Ch2_PanelIO:    ld      a,(iy+1)
+                and     a,$c0
+                ld      b,a
+                ld      a,(MIDE_STEUER)
+                and     a,$3f
+                or      a,b
+                ld      (MIDE_STEUER),a
+                out     (REG_STEUER),a
+                in      a,(REG_SWITCH)
+                ld      (iy+1),a
+                jp      Ch2_End_N
+
+
+; **********************************************************
+; Funktion 7 : IDE Register lesen
+; UNFERTIG, UNGETESTET!!!
+Ch2_ReadReg:    ld      a,(MIDE_STEUER)
+                and     a,$e0
+                ld      d,a
+                ld      c,REG_STEUER
+                ld      b,7
+                push    iy
+                pop     hl
+                inc     hl
+Ch2_ReadReg_1:  ld      a,$18
+                sub     a,b
+                or      a,d
+                out     (c),a
+                in      a,(REG_RESET)
+                in      a,(REG_DATA)
+                ld      (hl),a
+                inc     hl
+                djnz    Ch2_ReadReg_1
+                jp      Ch2_End_N
+
+
+; **********************************************************
+; Funktion 8 : IDE Register schreiben
+; UNFERTIG, UNGETESTET!!!
+Ch2_WriteReg:   ld      a,(MIDE_STEUER)
+                and     a,$e0
+                ld      d,a
+                ld      c,REG_DATA
+                ld      a,$16
+                or      a,d
+                out     (REG_STEUER),a
+                in      a,(REG_RESET)
+                ld      a,(iy+6)
+                out     (c),a
+                ld      a,0
+                out     (c),a
+                ld      b,7
+                push    iy
+                pop     hl
+                inc     hl
+Ch2_WriteReg_1: ld      a,$18
+                sub     a,b
+                or      a,d
+                out     (REG_STEUER),a
+                in      a,(REG_RESET)
+                ld      a,(hl)
+                out     (c),a
+                ld      a,0
+                out     (c),a
+                inc     hl
+                djnz    Ch2_WriteReg_1
+                jp      Ch2_End_N
+
+Ch2_CheckRDY:   
+Ch2_SetLBA28:
+Ch2_DMA:        ret
+
+
+; **********************************************************
+; Funktion 30 : alternative Mailbox registrieren
+Ch2_Reg_MB:     inc     iy
+                inc     iy
+                inc     iy
+                inc     iy
+                call    $0c29             ; 8086-Adresse in Z80-Adresse umrechnen; offset in HL und $3BE3, segment in A und $3BE2
+                ld      c,a
+                ld      a,(CH2_AMB1_I)
+                or      a,a
+                ld      b,0
+                jr      nz,Ch2_Reg_MB_1
+                ld      b,1
+                ld      a,c
+                ld      (CH2_AMB1_A),hl
+                ld      (CH2_AMB1_I),a
+                jp      Ch2_End_N
+Ch2_Reg_MB_1:   ld      a,(CH2_AMB2_I)
+                or      a,a
+                jr      nz,Ch2_Reg_MB_2
+                ld      b,2
+                ld      a,c
+                ld      (CH2_AMB2_A),hl
+                ld      (CH2_AMB2_I),a
+                jr      Ch2_End_N
+Ch2_Reg_MB_2:   ld      a,(CH2_AMB3_I)
+                or      a,a
+                jr      nz,Ch2_End_N
+                ld      b,3
+                ld      a,c
+                ld      (CH2_AMB3_A),hl
+                ld      (CH2_AMB3_I),a
+                jr      Ch2_End_N
+
+
+; **********************************************************
+; Funktion 31 : alternative Mailbox loeschen
+Ch2_Del_MB:     inc     iy
+                inc     iy
+                inc     iy
+                inc     iy
+                call    $0c29             ; 8086-Adresse in Z80-Adresse umrechnen; offset in HL und $3BE3, segment in A und $3BE2
+                ld      c,a
+                ld      d,h
+                ld      e,l
+                ld      a,(CH2_AMB1_I)
+                cp      a,c
+                ld      b,0
+                jr      nz,Ch2_Del_MB_1
+                ld      hl,(CH2_AMB1_A)
+                sbc     hl,de
+                jr      nz,Ch2_Del_MB_1
+                xor     a,a
+                ld      h,a
+                ld      l,a
+                ld      b,1
+                ld      (CH2_AMB1_A),hl
+                ld      (CH2_AMB1_I),a
+                jr      Ch2_End_N
+Ch2_Del_MB_1:   ld      a,(CH2_AMB2_I)
+                cp      a,c
+                jr      nz,Ch2_Del_MB_2
+                ld      a,c
+                ld      hl,(CH2_AMB1_A)
+                sbc     hl,de
+                jr      nz,Ch2_Del_MB_2
+                xor     a,a
+                ld      h,a
+                ld      l,a
+                ld      b,2
+                ld      (CH2_AMB2_A),hl
+                ld      (CH2_AMB2_I),a
+                jr      Ch2_End_N
+Ch2_Del_MB_2:   ld      a,(CH2_AMB3_I)
+                cp      a,c
+                jr      nz,Ch2_End_N
+                ld      a,c
+                ld      hl,(CH2_AMB1_A)
+                sbc     hl,de
+                jr      nz,Ch2_End_N
+                xor     a,a
+                ld      h,a
+                ld      l,a
+                ld      b,3
+                ld      (CH2_AMB2_A),hl
+                ld      (CH2_AMB2_I),a
+                jr      Ch2_End_N
+                
+
+Ch2_WriteLBA28:
+Ch2_Error:
+
+; **********************************************************
+; UNFERTIG, UNGETESTET!!!
+; Funktion 3 : LBA48 Sektor lesen
+Ch2_ReadLBA48:
+
+; **********************************************************
+; UNFERTIG, UNGETESTET!!!
+; Funktion 5 : LBA48 Sektor schreiben
+Ch2_WriteLBA48:
+
+; **********************************************************
+; UNFERTIG, UNGETESTET!!!
+; Funktion 9 : Datenblock von IDE lesen
+Ch2_ReadData:
+
+; **********************************************************
+; UNFERTIG, UNGETESTET!!!
+; Funktion 10 : Datenblock an IDE schreiben
+Ch2_WriteData:
+
+; **********************************************************
+; Ende ohne Interrupt ans Host-System
+Ch2_End_N:      call    Ch2_End_I
+                scf
+                ret
+
+; **********************************************************
+; Ende mit Interrupt ans Host-System
+Ch2_End_I:      ld      a,(CH2_CMB_I)
+                out     (REG_HOSTSEL),a
+                ld      iy,(CH2_CMB_A)
+                xor     a,a
+                ld      (iy+1),b
+                ld      (iy+2),c
+                ld      (iy+0),a
+                ret
+
+     
+; **********************************************************
+; Funktion 20 : Kommando an USB senden
+Ch2_USB_CMD:    ld      a,(MIDE_STEUER)
+                or      a,$01
+                out     (REG_STEUER),a
+                ld      a,(iy+1)
+                out     (REG_USB),a
+                jr      Ch2_End_N
+                
+; **********************************************************
+; Funktion 21 : Status von USB holen
+Ch2_USB_STAT:   in      a,(REG_SWITCH)
+                and     a,$08
+                ld      b,0
+                jr      nz,Ch2_End_N
+                ld      b,1
+                jr      Ch2_End_N
+
+; **********************************************************
+; Funktion 22 : Datenbyte an USB senden
+Ch2_USB_OUT:    ld      a,(MIDE_STEUER)
+                and     a,$fe
+                out     (REG_STEUER),a
+                ld      a,(iy+1)
+                out     (REG_USB),a
+                jr      Ch2_End_N
+
+; **********************************************************
+; Funktion 23 : Datenbyte von USB holen
+Ch2_USB_IN:     ld      a,(MIDE_STEUER)
+                and     a,$fe
+                out     (REG_STEUER),a
+                in      a,(REG_USB)
+                ld      b,a
+                jr      Ch2_End_N
+
+; **********************************************************
+; Funktion 24 : Datenblock an USB senden
+Ch2_USB_SEND:   call    USB_MakeRdy
+                jp      z,Ch2_USB_S_9
+                cp      a,$14
+                jp      nz,Ch2_USB_S_9
+                ld      b,$56          ; Kommando: Write Sektor
+                call    USB_CMD
+                ld      a,(iy+6)
+                out     (REG_USB),a
+                ld      a,(iy+7)
+                out     (REG_USB),a
+                ld      a,(iy+8)
+                out     (REG_USB),a
+                ld      a,(iy+9)
+                out     (REG_USB),a
+                ld      a,(iy+5)
+                out     (REG_USB),a
+                ld      l,a
+                ld      a,(MUSB_State)
+                set     7,a
+                ld      (MUSB_State),a
+                xor     a,a
+                ld      h,a
+                sla     l
+                rl      h
+                sla     l
+                rl      h
+                sla     l
+                rl      h
+                ld      (USECCOUNT),hl
+                inc     iy
+                inc     iy
+                inc     iy
+                inc     iy
+                call    $0c29           ; 8086-Adresse in Z80-Adresse umrechnen; addr in HL, io in A
+                out     (REG_HOSTSEL),a
+                ld      (UDMA_MEM_ADR),hl
+                ld      a,$05           ; DMA Richtung: B-->A (Schreiben)
+                ld      (UDMA_DIR),a
+
+; Ausrechnen wieviele 64Byte Bloecke in den EMS passen
+Ch2_USB_S_1:    ld      de,(UDMA_MEM_ADR);HL= c000    c001    d000    d000    ffc0    ffc1    ffe0
+                ld      hl,63
+                add     hl,de           ; HL= c03f    c040    d03f    d040    ffff    10000   1001f
+                jp      c,Ch2_USB_S_10  ; Ende vom EMS? Dann krigt dieser Block eine Spezialbehandlung
+                sla     l
+                rl      h
+                sla     l
+                rl      h               ; HL= 300fe   30100   340fc   34100   3fffc   (entfallen)
+                xor     a,a
+                ld      d,a
+                sub     a,h            
+                ld      e,a
+                jr      c,Ch2_USB_S_2
+                inc     d               ; DE= 0100    00ff    00c0    00bf    0001
+                                        ;ADR= 10000   ffc1    10000   ffc0    100000
+
+; in den EMS passende Bloecke vom Sektorzaehler abziehen
+Ch2_USB_S_2:    xor     a,a
+                ld      hl,(USECCOUNT)
+                sbc     hl,de
+                jr      nc,Ch2_USB_S_3  ; Uebertrag?
+                ld      de,(USECCOUNT)  ; Ja! es passen also alle Bloecke in den EMS
+                xor     a,a           
+                ld      h,a
+                ld      l,a
+Ch2_USB_S_3:    ld      (USECCOUNT),hl
+
+; DMA-Kontroller Parameter laden
+                ld      hl,UDMA_PARAM   ; Addresse DMA-Paramter
+                ld      bc,UDMA_PAR_COUNT*256 ; Anzahl DMA-Parameter und Controller-Port (0)
+                otir
+
+; Auf USB-Interrupt-Signal testen
+Ch2_USB_S_4:    ld      hl,50000        ; Timeout-Konstante
+Ch2_USB_S_5:    in      a,(REG_SWITCH)
+                and     a,$08
+                jr      nz,Ch2_USB_S_8
+
+; USB-Status abrufen und auf "schreibbereit" testen
+                ld      b,$22           ; Status holen
+                call    USB_CMD
+                in      a,(REG_USB)
+                cp      a,$1e           ; Bereit zum Schreiben
+                jr      nz,Ch2_USB_S_9
+
+; USB-Daten abrufen
+                ld      b,$2b           ; Schreibe USB daten
+                call    USB_CMD
+
+; Byte-Anzahl schreiben
+                ld      a,64
+                out     (REG_USB),a
+
+; DMA starten
+                ld      a,$87
+                out     (0),a
+
+; Continue Disk Write zu USB senden
+                ld      b,$57
+                call    USB_CMD
+
+                dec     e
+                jr      z,Ch2_USB_S_6
+
+; DMA fortsetzen vorbereiten
+                ld      a,$83           ; DMA-Kommando: Stop
+                out     (0),a
+                ld      a,$d3           ; DMA-Kommando: Continue (resettet den Bytecounter)
+                out     (0),a
+                jr      Ch2_USB_S_4
+
+Ch2_USB_S_6:    ld      hl,(USECCOUNT)
+                xor     a,a
+                or      a,h
+                or      a,l
+                ld      bc,0
+                jr      z,Ch2_End_I
+                ld      a,(UDMA_MEM_ADR)
+                and     a,$3f
+                jr      nz,Ch2_USB_S_7
+                ld      hl,$c000
+                ld      (UDMA_MEM_ADR),hl
+                ld      a,(HOSTSEG)     ; Mapping-Register +1
+                inc     a
+                ld      (HOSTSEG),a
+                out     (REG_HOSTSEL),a
+                jr      Ch2_USB_S_1
+
+Ch2_USB_S_7:    or      a,$c0
+                ld      l,a
+                ld      h,$ff
+                ld      (UDMA_MEM_ADR),hl
+                jr      Ch2_USB_S_1
+
+Ch2_USB_S_8:    
+                dec     l
+                jr      nz,Ch2_USB_S_5
+
+                dec     h
+                jr      nz,Ch2_USB_S_5
+Ch2_USB_S_13:   call    USB_Reset_D
+Ch2_USB_S_9:    call    USB_GetOnline
+                jr      z,Ch2_USB_S_14
+                call    USB_G_Param1B
+                jr      z,Ch2_USB_S_14
+                ld      b,0
+Ch2_USB_S_15:   djnz    Ch2_USB_S_15
+                call    USB_G_Err
+                ld      b,0
+Ch2_USB_S_16:   djnz    Ch2_USB_S_16
+                ld      bc,$800B
+                jr      Ch2_End_I
+
+Ch2_USB_S_14:   ld      bc,$8002
+                jr      Ch2_End_I
+                
+Ch2_USB_S_10:   in      a,(REG_SWITCH)
+                and     a,$08
+                jr      nz,Ch2_USB_S_10 ; hier mal ohne Timeout
+
+                ld      b,$22           ; Status holen
+                call    USB_CMD
+                in      a,(REG_USB)
+                cp      a,$1e           ; Bereit zum Schreiben
+                jr      nz,Ch2_USB_S_9
+
+                ld      b,$2b           ; Schreibe USB daten
+                call    USB_CMD
+
+                ld      a,64
+                out     (REG_USB),a
+
+                ld      b,a
+                ld      hl,(UDMA_MEM_ADR)
+Ch2_USB_S_11:   ld      a,(hl)          ; DMA lohnt sich hier nicht
+                out     (REG_USB),a
+                inc     l               ; h ist schon $ff 
+                jr      nz,Ch2_USB_S_12
+                ld      h,$c0           ; zurueck zum Start des Host-Speichers
+                ld      a,(HOSTSEG)     ; Mapping-Register +1
+                inc     a
+                ld      (HOSTSEG),a
+                out     (REG_HOSTSEL),a
+Ch2_USB_S_12:   djnz    Ch2_USB_S_11
+                ld      (UDMA_MEM_ADR),hl
+
+                ld      b,$57           ; Continue Disk Write
+                call    USB_CMD
+
+                ld      hl,(USECCOUNT)
+                dec     hl
+                ld      (USECCOUNT),hl
+
+                xor     a,a
+                ld      b,a
+                or      a,h
+                or      a,l
+                jr      nz,Ch2_USB_S_1
+                call    USB_WaitINT
+                jr      z,Ch2_USB_S_13
+                cp      a,$14
+                jr      nz,Ch2_USB_S_13
+                jr      Ch2_End_I
+
+
+; **********************************************************
+; Funktion 25 : Datenblock von USB holen
+Ch2_USB_RECV:   call    USB_MakeRdy
+                jp      z,Ch2_USB_R_9
+                cp      a,$14
+                jp      nz,Ch2_USB_R_9
+                ld      b,$54          ; Kommando: read Sektor
+                call    USB_CMD
+                ld      a,(iy+6)
+                out     (REG_USB),a
+                ld      a,(iy+7)
+                out     (REG_USB),a
+                ld      a,(iy+8)
+                out     (REG_USB),a
+                ld      a,(iy+9)
+                out     (REG_USB),a
+                ld      a,(iy+5)
+                out     (REG_USB),a
+                ld      l,a
+                xor     a,a
+                ld      h,a
+                sla     l
+                rl      h
+                sla     l
+                rl      h
+                sla     l
+                rl      h
+                ld      (USECCOUNT),hl
+                inc     iy
+                inc     iy
+                inc     iy
+                inc     iy
+                call    $0c29           ; 8086-Adresse in Z80-Adresse umrechnen; addr in HL, io in A
+                out     (REG_HOSTSEL),a
+                ld      (UDMA_MEM_ADR),hl
+                ld      a,$01           ; DMA Richtung: A-->B (Lesen)
+                ld      (UDMA_DIR),a
+
+; Ausrechnen wieviele 64Byte Bloecke in den EMS passen
+Ch2_USB_R_1:    ld      de,(UDMA_MEM_ADR);HL= c000    c001    d000    d000    ffc0    ffc1    ffe0
+                ld      hl,63
+                add     hl,de           ; HL= c03f    c040    d03f    d040    ffff    10000   1001f
+                jp      c,Ch2_USB_R_11  ; Ende vom EMS? Dann krigt dieser Block eine Spezialbehandlung
+                sla     l
+                rl      h
+                sla     l
+                rl      h               ; HL= 300fe   30100   340fc   34100   3fffc   (entfallen)
+                xor     a,a
+                ld      d,a
+                sub     a,h            
+                ld      e,a
+                jr      c,Ch2_USB_R_2
+                inc     d               ; DE= 0100    00ff    00c0    00bf    0001
+                                        ;ADR= 10000   ffc1    10000   ffc0    100000
+
+; in den EMS passende Bloecke vom Sektorzaehler abziehen
+Ch2_USB_R_2:    xor     a,a
+                ld      hl,(USECCOUNT)
+                sbc     hl,de
+                jr      nc,Ch2_USB_R_3  ; Uebertrag?
+                ld      de,(USECCOUNT)  ; Ja! es passen also alle Bloecke in den EMS
+                xor     a,a           
+                ld      h,a
+                ld      l,a
+Ch2_USB_R_3:    ld      (USECCOUNT),hl
+
+; DMA-Kontroller Parameter laden
+                ld      hl,UDMA_PARAM   ; Addresse DMA-Paramter
+                ld      bc,UDMA_PAR_COUNT*256 ; Anzahl DMA-Parameter und Controller-Port (0)
+                otir
+
+; Auf USB-Interrupt-Signal testen
+Ch2_USB_R_4:    ld      hl,50000        ; Timeout-Konstante
+Ch2_USB_R_5:    in      a,(REG_SWITCH)
+                and     a,$08
+                jr      nz,Ch2_USB_R_8
+
+; USB-Status abrufen und auf "lesebereit" testen
+                ld      b,$22           ; Status holen
+                call    USB_CMD
+                in      a,(REG_USB)
+                cp      a,$1d           ; Bereit zum Lesen
+                jr      nz,Ch2_USB_R_9
+
+; USB-Daten abrufen
+                ld      b,$28           ; Lese USB daten
+                call    USB_CMD
+
+; Byte-Anzahl abrufen
+                in      a,(REG_USB)
+                cp      a,64
+                jr      nz,Ch2_USB_R_10
+
+; DMA starten
+                ld      a,$87
+                out     (0),a
+
+; Continue Disk Read zu USB senden
+                ld      b,$55
+                call    USB_CMD
+
+                dec     e
+                jr      z,Ch2_USB_R_6
+
+; DMA fortsetzen vorbereiten
+                ld      a,$83           ; DMA-Kommando: Stop
+                out     (0),a
+                ld      a,$d3           ; DMA-Kommando: Continue (resettet den Bytecounter)
+                out     (0),a
+                jr      Ch2_USB_R_4
+
+Ch2_USB_R_6:    ld      hl,(USECCOUNT)
+                xor     a,a
+                or      a,h
+                or      a,l
+                ld      bc,0
+                jr      z,Ch2_End_I
+                ld      a,(UDMA_MEM_ADR)
+                and     a,$3f
+                jr      nz,Ch2_USB_R_7
+                ld      hl,$c000
+                ld      (UDMA_MEM_ADR),hl
+                ld      a,(HOSTSEG)     ; Mapping-Register +1
+                inc     a
+                ld      (HOSTSEG),a
+                out     (REG_HOSTSEL),a
+                jr      Ch2_USB_R_1
+
+Ch2_USB_R_7:    or      a,$c0
+                ld      l,a
+                ld      h,$ff
+                ld      (UDMA_MEM_ADR),hl
+                jr      Ch2_USB_R_1
+
+Ch2_USB_R_8:    dec     l
+                jr      nz,Ch2_USB_R_5
+                dec     h
+                jr      nz,Ch2_USB_R_5
+Ch2_USB_R_10:   call    USB_Reset_D
+Ch2_USB_R_9:    call    USB_GetOnline
+                jr      z,Ch2_USB_R_14
+                call    USB_G_Param1B
+                jr      z,Ch2_USB_R_14
+                ld      b,0
+Ch2_USB_R_15:   djnz    Ch2_USB_R_15
+                call    USB_G_Err
+                ld      b,0
+Ch2_USB_R_16:   djnz    Ch2_USB_R_16
+                ld      bc,$800B
+                jr      Ch2_End_I
+
+Ch2_USB_R_14:   ld      bc,$8002
+                jr      Ch2_End_I
+
+Ch2_USB_R_11:   in      a,(REG_SWITCH)
+                and     a,$08
+                jr      nz,Ch2_USB_R_11 ; hier mal ohne Timeout
+
+                ld      b,$22           ; Status holen
+                call    USB_CMD
+                in      a,(REG_USB)
+                cp      a,$1d           ; Bereit zum Lesen
+                jr      nz,Ch2_USB_R_9
+
+                ld      b,$28           ; Lese USB daten
+                call    USB_CMD
+
+                in      a,(REG_USB)
+                cp      a,64
+                jr      nz,Ch2_USB_R_10
+
+                ld      b,a
+                ld      hl,(UDMA_MEM_ADR)
+Ch2_USB_R_12:   in      a,(REG_USB)     ; DMA lohnt sich hier nicht
+                ld      (hl),a
+                inc     l               ; h ist schon $ff 
+                jr      nz,Ch2_USB_R_13
+                ld      h,$c0           ; zurueck zum Start des Host-Speichers
+                ld      a,(HOSTSEG)     ; Mapping-Register +1
+                inc     a
+                ld      (HOSTSEG),a
+                out     (REG_HOSTSEL),a
+Ch2_USB_R_13:   djnz    Ch2_USB_R_12
+                ld      (UDMA_MEM_ADR),hl
+
+                ld      b,$55           ; Continue Disk Read
+                call    USB_CMD
+
+                ld      hl,(USECCOUNT)
+                dec     hl
+                ld      (USECCOUNT),hl
+
+                xor     a,a
+                ld      b,a
+                or      a,h
+                or      a,l
+                jr      z,Ch2_End_I
+                jr      Ch2_USB_R_1
+
+USB_CMD:        ld      a,(MIDE_STEUER)
+                or      a,$01
+                out     (REG_STEUER),a
+                ld      c,a
+                ld      a,b
+                out     (REG_USB),a
+                ld      a,c
+                and     a,$fe
+                out     (REG_STEUER),a
+                ret
+
+
+; **********************************************************
+; Funktion 26 : Disk Lese/Schreib-bereit machen
+Ch2_USB_INIT:   call    USB_MakeRdy
+                ld      b,a
+                jp      Ch2_End_N
+                
+
+; **********************************************************
+USB_G_Param1B:  ld      b,$0A
+                call    USB_CMD
+                ld      a,$1B
+                out     (REG_USB),a
+                in      a,(REG_USB)
+                and     a, $7F
+                ret
+
+; **********************************************************
+USB_WaitINT:    ld      e,100
+                ld      hl,0
+USB_WaitINT_1:  in      a,(REG_SWITCH)
+                and     a,$08
+                jr      z,USB_WaitINT_3
+                dec     l
+                jr      nz,USB_WaitINT_1
+                dec     h
+                jr      nz,USB_WaitINT_1
+                dec     e
+                jr      nz,USB_WaitINT_1
+                ld      b,$17           ; Abort NAK
+                call    USB_CMD
+                ld      b,0
+USB_WaitINT_2:  djnz    USB_WaitINT_2
+USB_WaitINT_3:  ld      b,$22           ; Get Status
+                call    USB_CMD
+                xor     a,a
+                or      a,l
+                or      a,h
+USB_WaitINT_4:  in      a,(REG_USB)
+                ret
+
+; **********************************************************
+USB_GetStatus:  ld      b,$22           ; Get Status
+                call    USB_CMD
+                jr      USB_WaitINT_4
+
+; **********************************************************
+USB_G_Param:    push    af
+                ld      b,$0A
+                call    USB_CMD
+                pop     af
+                out     (REG_USB),a
+                jr      USB_WaitINT_4
+
+; **********************************************************
+USB_S_Param:    push    bc
+                ld      b,$0B
+                call    USB_CMD
+                pop     bc
+                ld      a,b
+                out     (REG_USB),a
+                ld      a,c
+                out     (REG_USB),a
+                ret
+
+; **********************************************************
+USB_CMD_P1:     push    bc
+                call    USB_CMD
+                pop     bc
+                ld      a,c
+                out     (REG_USB),a
+                ret
+
+; **********************************************************
+USB_G_Err:      call    USB_GetOnline
+                ret     z
+                ld      b,$5A         ; Request Disk Error status
+                call    USB_CMD
+; ret fehlt mit Absicht!
+
+; **********************************************************
+USB_WaitSucc:   call    USB_WaitINT
+                ret     z
+                cp      a,$14         ; Status: success
+                jr      nz,RET_SET_Z
+RET_RES_Z:      or      a,$ff
+                ret
+RET_SET_Z:      xor     a,a
+                ret
+
+; **********************************************************
+USB_G_Rdy:      ld      b,$59         ; Detect Disk Ready
+                call    USB_CMD
+                jr      USB_WaitSucc
+
+; **********************************************************
+USB_Reset_D:    ld      b,20
+USB_Reset_D_1:  djnz    USB_Reset_D_1
+                call    USB_GetOnline
+                ret     z
+                ld      b,$52         ; Disk Reset
+                call    USB_CMD
+                call    USB_WaitSucc
+                ret     z
+                ld      b,0
+USB_Reset_D_2:  djnz    USB_Reset_D_2
+                ld      a,$31
+                call    USB_G_Param
+                and     a,$3F
+                ld      b,$31
+                ld      c,a
+                call    USB_S_Param
+                ld      a,$32
+                call    USB_G_Param
+                sra     a
+                sra     a
+                sra     a
+                sra     a
+                and     a,$0F
+                or      a,$80
+                ld      b,$41         ; Clear STALL
+                ld      c,a
+                call    USB_CMD_P1
+                ld      b,0
+USB_Reset_D_3:  djnz    USB_Reset_D_3
+                ld      a,$33
+                call    USB_G_Param
+                sra     a
+                sra     a
+                sra     a
+                sra     a
+                and     a,$0F
+                ld      b,$41         ; Clear STALL
+                ld      c,a
+                call    USB_CMD_P1
+                ld      b,0
+USB_Reset_D_4:  djnz    USB_Reset_D_4
+                ret
+
+; **********************************************************
+USB_GetOnline:  call    USB_GetStatus
+                ld      a,$20
+                call    USB_G_Param
+                and     a,$20
+                ret
+
+; **********************************************************
+USB_MakeRdy:    call    USB_G_Param1B
+                jp      nz,USB_MakeRdy_4
+                ld      b,20
+USB_MakeRdy_1:  djnz    USB_MakeRdy_1
+                call    USB_GetOnline
+                ret     z
+                ld      b,0
+USB_MakeRdy_2:  djnz    USB_MakeRdy_2
+                call    USB_GetOnline
+                ret     z
+                ld      b,$51        ; Init Disk
+                call    USB_CMD
+                call    USB_WaitSucc
+                ret     z
+                call    USB_G_Rdy
+                jr      nz,USB_MakeRdy_3
+                ld      b,0
+USB_MakeRdy_7:  djnz    USB_MakeRdy_7
+                call    USB_G_Err
+                ld      b,0
+USB_MakeRdy_8:  djnz    USB_MakeRdy_8
+                call    USB_G_Rdy
+                jr      nz,USB_MakeRdy_3
+                ld      b,0
+USB_MakeRdy_9:  djnz    USB_MakeRdy_9
+                call    USB_G_Err
+                ret     z
+USB_MakeRdy_3:  ld      a,$14
+                or      a,a
+                ret
+USB_MakeRdy_4:  ld      a,(MUSB_State)
+                bit     7,a          ; Letzte OP war schreiben?
+                res     7,a
+                ld      (MUSB_State),a
+                jr      z,USB_MakeRdy_3
+                ld      hl,1000
+USB_MakeRdy_5:  ld      b,0
+USB_MakeRdy_6:  djnz    USB_MakeRdy_6
+                call    USB_G_Rdy
+                jr      nz,USB_MakeRdy_3
+                call    USB_GetOnline
+                ret     z
+                call    USB_G_Err
+                dec     l
+                jr      nz,USB_MakeRdy_5
+                dec     h
+                jr      nz,USB_MakeRdy_5
+                jr      USB_MakeRdy_3
+
+
+; ***************************************************************
+; Z80-DMA Parameter
+
+udma_param_st:  db      $C3             ; Reset
+                db      $79             ; Transfer B-->A
+udma_mem_addr:  dw      $2100           ; Port A Addresse
+udma_blk_len:   dw      $003f           ; Block Laenge
+                db      $54             ; Port A Memory, Increasing
+udma_mem_flag:  db      $01             ; Port A: 3 Cycle, halb IORQ, halb MREQ, halb RD, halb WR
+                db      $68             ; Port B IO, Fixed
+                db      $4E             ; Port B: 2 Cycle, voll IORQ, voll MREQ, voll RD, halb WR
+                db      $80             ; no INT, no STOP
+                db      $BD             ; Conti Mode
+udma_port_plag: db      $b3             ; Port Low
+                db      $00             ; Port High
+                db      $12             ; Interrupt am Ende
+                db      $10             ; Interropt Vektor
+udma_mux_flag:  db      $92             ; READY active High, multiplexed
+                db      $CF             ; Load Command
+udma_dir:       db      $01             ; Transfer direction
+                db      $CF             ; Load
+udma_param_en:  db      0
+
+
+UDMA_MEM_FLAG   equ     UDMA_PARAM+(udma_mem_flag-udma_param_st)
+UDMA_MUX_FLAG   equ     UDMA_PARAM+(udma_mux_flag-udma_param_st)
+UDMA_DIR        equ     UDMA_PARAM+(udma_dir-udma_param_st)
+UDMA_PAR_COUNT  equ     udma_param_en-udma_param_st
+UDMA_PORT_ADR   equ     UDMA_PARAM+(udma_port_plag-udma_param_st)
+UDMA_MEM_ADR    equ     UDMA_PARAM+(udma_mem_addr-udma_param_st)
+UDMA_BLK_LEN    equ     UDMA_PARAM+(udma_blk_len-udma_param_st)
+

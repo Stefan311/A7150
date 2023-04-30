@@ -5,6 +5,7 @@ Die Tools sind so angelegt, dass die auf dem A7150 selbst, oder auf einem PC in 
 Dazu wird benötigt:
 + Turbo Pascal 7
 + AS80 Dos-Version (http://www.kingswood-consulting.co.uk/assemblers/index.html)
++ A86 Dos-Version (https://eji.com/a86/)
 
 TP7 und AS80 sollten über die PATH-Umgebungsvariable erreichbar sein. (ggf. in die AUTOEXEC.BAT eintragen)
 

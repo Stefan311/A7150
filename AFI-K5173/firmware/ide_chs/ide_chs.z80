@@ -46,10 +46,12 @@
 ; Basisversion abgeleitet von IDE V0.3 / V0.4
 ; V0.2
 ; Diese Version nutzt jetzt das CHS-Translation Feature der IDE-Platten
+; V0.3
+; Support zur Nutzung des Kanal B fuer den USB-Kontroller
 
 ; ***************************************************************
 ; Schalter fuer Features:
-CHAN2Interface  equ     0               ; 0 = deaktivieren, 1 = aktivieren
+CHAN2Interface  equ     1               ; 0 = deaktivieren, 1 = aktivieren
 
 ; ***************************************************************
 ; Parameter von und zur KES
@@ -82,6 +84,8 @@ REG_DATA        equ     $B0             ; IO-Port IDE-Daten (Lesen und Schreiben
 REG_STEUER      equ     $B1             ; IO-Port Steuerregister (Schreiben)
 REG_SWITCH      equ     $B1             ; IO-Port Steuerregister (Lesen)
 REG_RESET       equ     $B2             ; IO-Port 16Bit-Toggler Reset (Lesen)
+REG_HOSTSEL     equ     $1C             ; IO-Port Hostspeicher Bit 14-19
+REG_USB         equ     $B3             ; IO-Port USB-Platine
 
 
 ; ***************************************************************
@@ -94,20 +98,25 @@ REG_RESET       equ     $B2             ; IO-Port 16Bit-Toggler Reset (Lesen)
 
 ; ***************************************************************
 ; KES-Reset-Routine
-Reset:          in      a,(REG_SWITCH)  ; Betriebsarten-Schalter
-                and     a,$f0
-                ret     z               ; bei Schalter "0" die AFI nicht initialisieren, fuer Debug hilfreich
-
-                ld      a,$18           ; IDE-Reset Signal
+Reset:          ld      a,$18           ; IDE-Reset Signal
                 out     (REG_STEUER),a
-                ld      b,20
-Reset_0:        djnz    Reset_0
+
+                ld      hl,dma_param_st
+                ld      de,MDMA_PARAM
+                ld      bc,dma_param_en-dma_param_st
+                ldir
+
+    if  CHAN2Interface=1
+                call    Chan2Reset
+    endif
+
                 ld      a,$38
                 out     (REG_STEUER),a
                 ld      (MIDE_STEUER),a
 
                 in      a,(REG_SWITCH)  ; Betriebsarten-Schalter
                 and     a,$f0
+                ret     z               ; bei Schalter "0" die AFI nicht initialisieren
                 cp      a,$10           ; Schalter "1"
                 jr      nz,Reset_1
                 ld      a,0             ; primary IDE
@@ -173,12 +182,7 @@ HDD_OK:         ld      bc,0            ; Errorcode: kein Fehler
 
 ; ***************************************************************
 ; HDD Initialisieren
-HDD_Init:       ld      hl,dma_param_st
-                ld      de,MDMA_PARAM
-                ld      bc,dma_param_en-dma_param_st
-                ldir
-
-                ld      ix,(BUFFER)     ; Festplattenparameter sichern
+HDD_Init:       ld      ix,(BUFFER)     ; Festplattenparameter sichern
                 ld      a,(ix+0)
                 ld      (MCYLINDERCT),a
                 ld      a,(ix+1)
@@ -605,7 +609,7 @@ ErrorLog_2:     ld      hl,(MERRORPTR)
 
 ; ***************************************************************
     if  CHAN2Interface=1
-    include "..\generic\chan2.z80"      ; echte Service-Routine fuer Kanal 2 (optional)
+    include "chan2.z80"      ; echte Service-Routine fuer Kanal 2 (optional)
     else
 ; Dummy-Service-Routine fuer Kanal 2
 Chan2:          scf                     ; Carry gesetzt heisst kein Fertig-Interrupt im Hostsystem ausloesen

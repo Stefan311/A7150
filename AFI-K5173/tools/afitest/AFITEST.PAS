@@ -565,6 +565,7 @@ begin
 end;
 
 begin
+  writeln('AFITEST V1.2');
   Kes_Init;
   Kes_Buffer_Clear;
   Kes_Load_Exec_Const(Kesprog);
@@ -579,6 +580,9 @@ begin
     if cmd=102 then diskfunct;
     if cmd=103 then usbfunct;
   until cmd=100;
+
+  Mem[$4A:6]:=255;
+  Port[$4B]:=1;
+  repeat until Mem[$4A:6]=0;
 end.
 
-

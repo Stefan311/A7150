@@ -28,10 +28,12 @@ pbase   equ     $3800   ; der RAM-Bereich $3800-$39FF sieht unbenutzt aus
 
 ; ********* Installer **********
 
+        ld      hl,($3b7d)
+        ld      (l15+1),hl
         ld      hl,fn
         ld      de,pbase
         ld      bc,fe-fn
-        ldir            ; kopiert die Serviceroutine in den freien RAM
+        ldir                ; kopiert die Serviceroutine in den freien RAM
         ld      hl,pbase
         ld      ($3b7d),hl  ; installiert die Serviceroutine als Kanal B Programm
         ret
@@ -101,7 +103,11 @@ l12:    cp      8           ; Kommando: Block Write (DMA)
         jr      nz,l14
         ld      a,$05       ; Richtung: A-->B
         jr      l13         ; der Rest ist wie bei Block Read
-l14:    jr      l6        
+l14:    cp      255
+        jr      nz,l6
+l15:    ld      hl,0
+        ld      ($3b7d),hl  ; alten Service-Handler wieder installieren
+        jr      l6
 
 
 ;  ******** Z80-DMA Parameter **********

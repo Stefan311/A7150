@@ -4,6 +4,6 @@ as80 -x kesprog.z80
 bin2inc kesprog.bin kesprog.inc Kesprog
 tpc afitest.pas
 @del kes.tpu
-@del kesprog.bin
+rem @del kesprog.bin
 @del kesprog.inc
 @del kesprog.lst

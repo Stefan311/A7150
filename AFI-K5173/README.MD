@@ -6,9 +6,10 @@ AFI ist einen Platine, mit dem IDE-Festplatten an das Datenträger-Subsystem des
 * Boot-Fähig
 * Firmware Flashrom im System beschreibbar
 * Iomega ZIP100 Atapi Laufwerke als Festplatte nutzbar
+* Unterstützung Arduino-USB-Board auf Basis vom CH375B zur Verwendung von USB-Sticks (Achtung: Platine muss auf 5V Signalpegel umbebaut werden!)
 
 ### Welche Features sind in Vorbereitung?
-* Unterstützung Arduino-USB-Board auf Basis vom CH375B zur Verwendung von USB-Sticks
+
 * Firmware mit DMA-Übertragung direkt in den Host-Speicher für höhere Übertragungsrate
 * Firmware "All in One"
 
@@ -21,5 +22,7 @@ AFI ist einen Platine, mit dem IDE-Festplatten an das Datenträger-Subsystem des
 [Firmware](firmware/)
 
 [Tools](tools/)
+
+[Treiber](treiber/)
 
 [Anleitungen: Hardware-Test](knowhow/Hardwaretest.MD)
