@@ -1,0 +1,44 @@
+;    procedure ChipErase2;
+;    begin
+;      asm CLI end; {disable}
+;      WMem($0,$FF);     { Reset }
+;      dummy:=RMem($1823);   { Software Data Unprotect }
+;      dummy:=RMem($1820);
+;      dummy:=RMem($1822);
+;      dummy:=RMem($0418);
+;      dummy:=RMem($041B);
+;      dummy:=RMem($0419);
+;      dummy:=RMem($041A);
+;      WMem($0,$30);     { Chip Erase }
+;      WMem($0,$30);
+;      Pause(1333);      { 20ms warten }
+;      asm STI end; {enable}
+;    end;
+
+        org    $2100
+
+        ld      a,0
+        out     ($B2),a
+        ld      a,$FF
+        ld      ($9000),a
+        ld      a,1
+        out     ($B2),a
+        ld      a,($9823)
+        ld      a,($9820)
+        ld      a,($9822)
+        ld      a,0
+        out     ($B2),a
+        ld      a,($9418)
+        ld      a,($941B)
+        ld      a,($9419)
+        ld      a,($941A)
+        ld      a,$30
+        ld      ($9000),a
+        ld      ($9000),a
+        ld      hl,20
+L1:     dec     h
+        jr      nz,L1
+        dec     l
+        jr      nz,L1
+        ret
+

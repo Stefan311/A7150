@@ -44,7 +44,8 @@ const UnknownMfg =   0; { unbekannter Hersteller }
       MX         = $C2; { Macronix International Co. Ltd. }
       SST        = $BF; { Silicon Storage Technology }
       STM        = $20; { SGS-Thomson Microelectronics}
-      Winbond    = $DA;
+	  Winbond    = $DA;
+	  Mitsubi    = $1C; { Mitsubishi Electronics }
       filler     = $FF; { Fuellbyte, wenn Datei kuerzer als Baustein }
 
 type page = array[0..2047] of byte;
@@ -60,7 +61,8 @@ var sprache  : char;         { 'D'eutsch/Default, 'E'nglish, 'N'ederlands }
     infile   : file;         { Datei fuer's Einlesen... }
     outfile  : file of page; { ...und fuer's Ausgeben }
     puffer   : page;         { und Puffer fuer BIOS-Inhalt }
-    adr      : longint;      { fortlaufende Zieladresse im Flash }
+	adr      : longint;      { fortlaufende Zieladresse im Flash }
+	info     : word;
     ok,                      { solange alles gutgeht... }
     autodetect,              { Baustein automatisch erkennen? }
     autoident,               { wurde auch automatisch erkannt }
@@ -87,7 +89,8 @@ begin
   else 
     begin
       for i:=0 to 2047 do puffer[i]:=255;
-      blockread(infile,puffer,datsize-adr);
+      if adr<datsize then
+        blockread(infile,puffer,datsize-adr);
     end;    
 end;
 
@@ -190,7 +193,8 @@ end;
 
 {$I KESFLASH.INC}
 
-{$I IDENT.INC}
+{$I IDENTZ80.INC}
+{$I IDENTPAS.INC}
 
 {$I ERASE.INC}
 
@@ -314,7 +318,7 @@ begin { Hauptprogramm }
                   'N' : writeln('Nederlandse vertaling en verbeteringen: A.S. Kerkmeester, www.flashbios.org');
                    else writeln('Dutch translation and improvement: A.S. Kerkmeester, www.flashbios.org')
   end{case};
-  writeln('A7150-Port 2022 von Stefan Berndt');
+  writeln('A7150-Port 2022/23 von Stefan Berndt');
 
   if (ParamCount>=2) and (ParamCount<=4) then begin
     ok:=true;
@@ -409,6 +413,14 @@ begin { Hauptprogramm }
                         'N' : writeln('Chip type ',typ,' van ',MfgStr(mfg),', capaciteit: ',memsize SHR 10,' KByte');
                         else writeln('Chip type ',typ,' from ',MfgStr(mfg),', capacity: ',memsize SHR 10,' KByte')
         end{case};
+
+    if (mfg=Atmel) then
+      begin
+        if (info and $ff) = $fe then writeln('Low Bootblock programmable.');
+        if (info and $ff) = $ff then writeln('Low Bootblock locked!');
+        if (info and $ff00) = $fe00 then writeln('High Bootblock programmable.');
+        if (info and $ff00) = $ff00 then writeln('High Bootblock locked!');
+      end;
 
     if not Lesen and (mfg<>UnknownMfg) and (memsize>0) and (memsize<>datsize) then begin
         ok:=false;
@@ -539,6 +551,7 @@ begin { Hauptprogramm }
       writeln('SST            PH29EE010/20, PH28SF040, PH39SF010/20');
       writeln('ST Microelec.  M28F256(A)/512, M28F101, M29F002T/NT/B/040');
       writeln('Winbond        W29EE011 (=AE29F1008), W29C010/11/20(=AE29F2008)/40, W49F002');
+      writeln('Mitsubishi     M5M28F101');
     end;
 end.
 

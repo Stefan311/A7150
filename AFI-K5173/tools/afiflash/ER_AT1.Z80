@@ -1,0 +1,55 @@
+;    procedure ChipErase;
+;    var t : longint;
+;    begin
+;      asm CLI end; {disable}
+;      WMem($5555,$AA); { Chip Erase }
+;      WMem($2AAA,$55);
+;      WMem($5555,$80);
+;      WMem($5555,$AA);
+;      WMem($2AAA,$55);
+;      WMem($5555,$10);
+;      Pause(1333);     { 20ms warten }
+;      asm STI end; {enable}
+;      t:=tick+181;     { ca. 10s Time-Out fuer Chip-Erase }
+;      repeat until ((RMem($0000) AND $80)=$80) or (tick>t);
+;      if (tick>t) then ok:=false;
+;      if not ok then EraseFailure('Time-Out');
+;    end;
+
+        org    $2100
+
+        ld      a,$5
+        out     ($b2),a
+        ld      a,$AA
+        ld      ($9555),a
+
+        ld      a,$2
+        out     ($b2),a
+        ld      a,$55
+        ld      ($9AAA),a
+
+        ld      a,$5
+        out     ($b2),a
+        ld      a,$80
+        ld      ($9555),a
+
+        ld      a,$AA
+        ld      ($9555),a
+
+        ld      a,$2
+        out     ($b2),a
+        ld      a,$55
+        ld      ($9AAA),a
+
+        ld      a,$5
+        out     ($b2),a
+        ld      a,$10
+        ld      ($9555),a
+
+        ld      hl,20
+L1:     dec     h
+        jr      nz,L1
+        dec     l
+        jr      nz,L1
+
+        ret

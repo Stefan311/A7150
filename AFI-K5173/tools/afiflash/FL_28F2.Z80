@@ -1,0 +1,95 @@
+;  procedure WriteByte28F001(a:longint;d:byte);
+;  var t   : longint;
+;      WSM : byte;
+;  begin
+;    asm CLI end; {disable}
+;    WMem(a,$40);
+;    WMem(a,d);
+;    asm STI end; {enable}
+;    t:=tick+2; { ca. 50ms Time-Out }
+;    repeat
+;      asm CLI end; {disable}
+;      WSM:=RMem(a); { Read Status Register }
+;      asm STI end; {enable}
+;    until ((WSM and $80)=$80) or (tick>t);
+;    asm CLI end; {disable}
+;    WSM:=RMem(a); { Read Status Register }
+;    WMem(a,$FF);  { Reset }
+;    asm STI end; {enable}
+;    if ((WSM and $38)<>$0) then ok:=false;
+;    if (tick>t) then ok:=false;
+;    if not ok then begin
+;      case sprache of 'D' : write(', Fehler:');
+;                      'N' : write(', Fout:');
+;                       else write(', Error:');
+;      end{case};
+;      if (WSM AND $08)=$08 then write(' Vpp Range (WSM=$',BTH(WSM),')');
+;      if (WSM AND $30)=$30 then write(' Command Sequence (WSM=$',BTH(WSM),')');
+;      if (WSM AND $20)=$20 then write(' Block Erase (WSM=$',BTH(WSM),')');
+;      if (WSM AND $38)=$0  then write(' Time-Out.');
+;      writeln;
+;      if (WSM AND $08)=$08 then writeln('Jumper J4 & J5 = +12V?');
+;    end;
+;  end;
+
+;    while ok and (i<sizeof(puffer)) do begin
+;      WriteByte28F001(adr,puffer[i]);
+;      inc(i); inc(adr);
+;      if not ok then dec(adr);
+;    end;
+
+
+
+        org    $2100
+        ld      iy,$3B43    ; Kes_IOPB^.buffer_ptr
+        call    $0c29       ; 8086-Adresse in Z80-Adresse umrechnen; offset in HL und $3BE3, segment in A und $3BE2
+        out     ($1C),a     ; Host-Segment einstellen
+        ld      iy,($3B44)  ; Flash-Addr(bit0-11) <-- Kes_IOPB^.requested_bytes_l
+        ld      de,$800
+
+L1:     ld      a,($3B46)   ; Flash-Addr(bit12-20) <-- Kes_IOPB^.requested_bytes_h
+        out     ($b2),a
+        ld      a,$40
+        ld      (iy+0),a
+        ld      a,(hl)
+        ld      (iy+0),a
+
+        ld      bc,10000
+L2:     bit     7,(iy+0)
+        jr      nz,L4
+        dec     c
+        jr      nz,L2
+        dec     d
+        jr      nz,L2
+        ld      a,0
+L3:     ld      ($3B34),a   ; Status --> Kes_IOPB^.done_bytes_h
+        ld      hl,$800
+        xor     a,a
+        sbc     hl,de
+        ld      ($3B32),hl  ; Anzahl geschriebener Bytes --> Kes_IOPB^.done_bytes_l
+        ld      a,0
+        out     ($1C),a     ; Host-Segment einstellen
+        ret
+     
+L4:     ld      a,(iy+0)
+        ld      b,a
+        ld      a,$ff
+        ld      (iy+0),a
+        ld      a,b
+        and     a,$38
+        jr      z,L3
+        inc     iy
+        inc     hl
+        ld      a,h
+        or      a,l
+        jr      nz,L5
+        ld      a,($3BE2)
+        inc     a
+        out     ($1C),a     ; Host-Segment einstellen
+        ld      h,$C0
+L5:     dec     e
+        jr      nz,L1
+        dec     d
+        jr      nz,L1
+        ld      a,1
+        jr      L3

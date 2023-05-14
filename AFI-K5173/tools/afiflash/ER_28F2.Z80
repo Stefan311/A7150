@@ -1,0 +1,60 @@
+;  procedure EraseBlock(a:longint);
+;  var t   : longint;
+;      wsm : byte; { Status Write State Machine }
+;  begin
+;    WMem(a,$FF); { Reset }
+;    WMem(a,$50); { Clear Status Register }
+;    WMem(a,$20); { EraseSetup }
+;    WMem(a,$D0); { EraseConfirm }
+;    t:=tick+379; { Time-Out max. 21s }
+;    repeat
+;      WSM:=RMem(a); { Read Status Register }
+;    until ((WSM and $80)=$80) or (tick>t);
+;    WSM:=RMem(a); { Read Status Register }
+;    WMem(a,$FF);  { Reset }
+;    if ((WSM and $38)<>$0) then ok:=false;
+;    if (tick>t) then ok:=false;
+;    if not ok then begin
+;      case sprache of 'D' : write(', Fehler:');
+;                      'N' : write(', Fout:');
+;                       else write(', Error:');
+;      end{case};
+;      if (WSM AND $08)=$08 then write(' Vpp Range (WSM=$',BTH(WSM),')');
+;      if (WSM AND $30)=$30 then write(' Command Sequence (WSM=$',BTH(WSM),')');
+;      if (WSM AND $20)=$20 then write(' Block Erase (WSM=$',BTH(WSM),')');
+;      if (WSM AND $38)=$0  then write(' Time-Out.');
+;    end;
+;    writeln;
+;    if (WSM AND $08)=$08 then writeln('Jumper JP1 = +12V?');
+;  end;
+
+        org    $2100
+
+        ld      hl,($3B44)  ; Addr(bit0-11) <-- Kes_IOPB^.requested_bytes_l
+        ld      a,($3B46)   ; Addr(bit12-20) <-- Kes_IOPB^.requested_bytes_h
+        out     ($B2),a
+
+        ld      a,$FF
+        ld      (hl),a
+        ld      a,$50
+        ld      (hl),a
+        ld      a,$20
+        ld      (hl),a
+        ld      a,$D0
+        ld      (hl),a
+
+        ld      b,50
+        ld      de,0
+L1:     ld      a,(hl)
+        and     a,$80
+        jr      nz,L2
+        dec     e
+        jr      nz,L1
+        dec     d
+        jr      nz,L1
+        djnz    L1
+L2:     ld      a,(hl)
+        ld      ($3B32),a   ; Status--> Kes_IOPB^.done_bytes_l
+        ld      a,$FF
+        ld      (hl),a
+        ret

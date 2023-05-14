@@ -1,0 +1,39 @@
+;    procedure ChipErase;
+;    begin
+;      asm CLI end; {disable}
+;      WMem($5555,$AA); { Chip Erase }
+;      WMem($2AAA,$55);
+;      WMem($5555,$80);
+;      WMem($0000,$FF);
+;      Pause(1333);     { 20ms warten }
+;      asm STI end; {enable}
+;    end;
+
+SEGPORT     equ     $B2
+SEGMEM      equ     $9000
+
+        org    $2100
+
+        ld      a,5
+        out     (SEGPORT),a
+        ld      a,$AA
+        ld      (SEGMEM+$555),a
+        ld      a,2
+        out     (SEGPORT),a
+        ld      a,$55
+        ld      (SEGMEM+$AAA),a
+        ld      a,5
+        out     (SEGPORT),a
+        ld      a,$80
+        ld      (SEGMEM+$555),a
+        ld      a,0
+        out     (SEGPORT),a
+        ld      a,$FF
+        ld      (SEGMEM),a
+
+        ld      hl,20
+L1:     dec     h
+        jr      nz,L1
+        dec     l
+        jr      nz,L1
+        ret

@@ -1,0 +1,81 @@
+;procedure EraseAMD1; { Am29Fxxx und kompatible }
+;var t : longint;
+;begin
+;  Pause(10*67); { 10ms warten }
+;  asm CLI end; {disable}
+;
+;  WMem($5555,$AA); { Reset/Read }
+;  WMem($2AAA,$55);
+;  WMem($5555,$F0);
+;  Pause(1);        { 15us warten }
+;
+;  WMem($5555,$AA); { Chip Erase }
+;  WMem($2AAA,$55);
+;  WMem($5555,$80);
+;  WMem($5555,$AA);
+;  WMem($2AAA,$55);
+;  WMem($5555,$10);
+;  asm STI end; {enable}
+;  t:=tick+541; { ca. 30s Time-Out fuer ChipErase }
+;  repeat until ((RMem($0000) AND $80)=$80) or (tick>t);
+;  if (tick>t) then ok:=false;
+;  Pause(1);        { 15us warten }
+;
+;  WMem($5555,$AA); { Reset/Read }
+;  WMem($2AAA,$55);
+;  WMem($5555,$F0);
+;  Pause(1);        { 15us warten }
+;end{EraseAMD1};
+
+
+SEGPORT     equ     $B2
+SEGMEM      equ     $9000
+
+        org    $2100
+
+        ld      hl,10
+L1:     dec     h
+        jr      nz,L1
+        dec     l
+        jr      nz,L1
+
+        ld      b,$F0
+        call    T1
+
+        ld      b,4
+L2:     djnz    L2
+
+        ld      b,$80
+        call    T1
+        ld      b,$10
+        call    T1
+
+        ld      a,0
+        out     (SEGPORT),a
+
+        ld      b,50
+        ld      hl,0
+L3:     ld      a,($9000)
+        and     a,$80
+        jr      nz,L4
+        dec     l
+        jr      nz,L3
+        dec     h
+        jr      nz,L3
+        djnz    L3
+L4:     ld      ($3B34),a   ; Status --> Kes_IOPB^.done_bytes_h
+        ld      b,$F0
+
+T1:     ld      a,5
+        out     (SEGPORT),a
+        ld      a,$AA
+        ld      (SEGMEM+$555),a
+        ld      a,2
+        out     (SEGPORT),a
+        ld      a,$55
+        ld      (SEGMEM+$AAA),a
+        ld      a,5
+        out     (SEGPORT),a
+        ld      a,b
+        ld      (SEGMEM+$555),a
+        ret

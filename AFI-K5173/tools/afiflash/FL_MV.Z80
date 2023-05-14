@@ -1,0 +1,87 @@
+; ungetestet: F/V29C51002T, F/V29C51002B
+
+;    procedure WritePage;
+;    var t : longint;
+;        b : byte;
+;    begin
+;      while ok and (i<s) do begin
+;        b:=puffer[i];
+;        asm CLI end; {disable}
+;        WMem($5555,$AA);
+;        WMem($2AAA,$55);
+;        WMem($5555,$A0);
+;        WMem(adr,b);
+;        asm STI end; {enable}
+;        t:=tick+2; { ca. 50ms Time-Out fuer Byte-Write }
+;        repeat until (RMem(adr)=b) or (tick>t);
+;        asm CLI end; {disable}
+;        WMem($5555,$AA);
+;        WMem($2AAA,$55);
+;        WMem($5555,$F0);
+;        asm STI end; {enable}
+;        if (tick>t) then ok:=false;
+;        inc(adr); inc(i);
+;      end;
+;    end;
+
+        org    $2100
+        ld      iy,$3B43    ; Kes_IOPB^.buffer_ptr
+        call    $0c29       ; 8086-Adresse in Z80-Adresse umrechnen; offset in HL und $3BE3, segment in A und $3BE2
+        out     ($1C),a     ; Host-Segment einstellen
+        ld      iy,($3B44)  ; Flash-Addr(bit0-11) <-- Kes_IOPB^.requested_bytes_l
+        ld      de,$800
+
+L1:     ld      b,$a0       ; Programm-Sequenz
+        call    P1
+
+        ld      a,($3B46)   ; Flash-Addr(bit12-20) <-- Kes_IOPB^.requested_bytes_h
+        out     ($b2),a
+        ld      a,(hl)
+        ld      (iy+0),a    ; Flash schreiben
+        ld      b,0
+L2:     cp      a,(iy+0)    ; Ergebnis pruefen
+        jr      z,L4
+        djnz    L2          ; max 27 Takte * 256 ~~ 7ms
+        ld      b,$F0
+        call    P1
+        ld      a,0
+L3:     ld      ($3B34),a   ; Status --> Kes_IOPB^.done_bytes_h
+        ld      hl,$800
+        xor     a,a
+        sbc     hl,de
+        ld      ($3B32),hl  ; Anzahl geschriebener Bytes --> Kes_IOPB^.done_bytes_l
+        ld      a,0
+        out     ($1C),a     ; Host-Segment einstellen
+        ret
+
+L4:     ld      b,$F0
+        call    P1
+        inc     iy
+        inc     hl
+        ld      a,h
+        or      a,l
+        jr      nz,L5
+        ld      a,($3BE2)
+        inc     a
+        out     ($1C),a     ; Host-Segment einstellen
+        ld      h,$C0
+L5:     dec     e
+        jr      nz,L1
+        dec     d
+        jr      nz,L1
+        ld      a,1
+        jr      L3
+
+P1:     ld      a,$05       ; Programm-Sequenz
+        out     ($b2),a
+        ld      a,$aa
+        ld      ($9555),a
+        ld      a,$02
+        out     ($b2),a
+        ld      a,$55
+        ld      ($9aaa),a
+        ld      a,$05
+        out     ($b2),a
+        ld      a,b
+        ld      ($9555),a
+        ret

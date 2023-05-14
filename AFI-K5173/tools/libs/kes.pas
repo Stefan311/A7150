@@ -109,8 +109,11 @@ procedure kes_load_exec_const(data: array of byte);
 procedure kes_buffer_transfer(to_kes: boolean; size: word);
 procedure kes_exec;
 procedure kes_buffer_clear;
+procedure kes_load_run_const(data: array of byte);
 
 implementation
+
+var iobp2: PKes_IOPB;
 
 procedure kes_init;
 begin
@@ -222,6 +225,28 @@ var
   i:word;
 begin
   for i:=0 to Kes_Maxbuffer do Kes_Data[i]:=0;
+end;
+
+procedure kes_load_run_const(data: array of byte);
+begin
+  with iobp2^ do
+    begin
+      devicecode:=0;
+      device_nr:=0;
+      functioncode:=$0e;
+      modification:=0;
+      cylinder:=$2100;
+      head:=$ff;
+      buffer_ptr:=@data;
+      requested_bytes_l:=sizeof(data);
+	end;
+  kes_cib^.io_ptr:=iobp2;
+  kes_ccb^.busy:=$ff;
+  kes_wakeup;
+  repeat until kes_ccb^.busy=0;
+  kes_cib^.status_semaphore:=0;
+  kes_cib^.io_ptr:=Kes_IOPB;
+  kes_exec;
 end;
 
 end.

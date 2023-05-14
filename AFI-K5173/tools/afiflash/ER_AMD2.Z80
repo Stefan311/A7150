@@ -1,0 +1,19 @@
+;      asm CLI end; {disable}
+;      WMem($0,$FF);      { Reset }
+;      Pause(1);          { 15 us warten }
+;      WMem($0,$30);      { Chip Erase }
+;      WMem($0,$30);
+;      asm STI end; {enable}
+
+        org    $2100
+
+        ld      a,0
+        out     ($B2),a
+        ld      a,$FF
+        ld      ($9000),a
+        ld      b,4
+L1:     djnz    L1
+        ld      a,$30
+        ld      ($9000),a
+        ld      ($9000),a
+        ret

@@ -1,0 +1,59 @@
+;procedure WriteByte28F0x0A(a:longint;d:byte);
+;var t       : longint;
+;begin
+;  asm CLI end; {disable}
+;  WMem(a,$50); { Program Setup  }
+;  WMem(a,d);   { Write Data     }
+;  Pause(1);    { 15us warten    }
+;  asm STI end; {enable}
+;  t:=tick+2;   { ca. 50ms Time-Out, jenseits von gut und boese... }
+;  repeat until (RMem(a)=d) or (tick>t);
+;  if (tick>t) then ok:=false;
+;end{WriteByte28F0x0A};
+
+        org    $2100
+        ld      iy,$3B43    ; Kes_IOPB^.buffer_ptr
+        call    $0c29       ; 8086-Adresse in Z80-Adresse umrechnen; offset in HL und $3BE3, segment in A und $3BE2
+        out     ($1C),a     ; Host-Segment einstellen
+        ld      iy,($3B44)  ; Flash-Addr(bit0-11) <-- Kes_IOPB^.requested_bytes_l
+        ld      de,$800
+
+L1:     ld      a,($3B46)   ; Flash-Addr(bit12-20) <-- Kes_IOPB^.requested_bytes_h
+        out     ($b2),a
+        ld      a,$50
+        ld      (iy+0),a    ; Flash schreiben
+        ld      a,(hl)
+        ld      (iy+0),a    ; Flash schreiben
+        ld      b,0
+        ld      c,0
+L2:     cp      a,(iy+0)    ; Ergebnis pruefen
+        jr      z,L4
+        djnz    L2
+        dec     c
+        jr      nz,L2
+        ld      a,0
+
+L3:     ld      ($3B34),a   ; Status --> Kes_IOPB^.done_bytes_h
+        ld      hl,$800
+        xor     a,a
+        sbc     hl,de
+        ld      ($3B32),hl  ; Anzahl geschriebener Bytes --> Kes_IOPB^.done_bytes_l
+        ld      a,0
+        out     ($1C),a     ; Host-Segment einstellen
+        ret
+
+L4:     inc     iy
+        inc     hl
+        ld      a,h
+        or      a,l
+        jr      nz,L5
+        ld      a,($3BE2)
+        inc     a
+        out     ($1C),a     ; Host-Segment einstellen
+        ld      h,$C0
+L5:     dec     e
+        jr      nz,L1
+        dec     d
+        jr      nz,L1
+        ld      a,1
+        jr      L3

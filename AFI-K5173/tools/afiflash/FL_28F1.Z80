@@ -1,0 +1,81 @@
+;procedure WriteByte28F0x0(a:longint;d:byte);
+;var o       : byte;
+;    cyc,max : word;
+;begin
+;  asm CLI end; {disable}
+;  cyc:=0;
+;  max:=25;       { max. Anzahl Schreibversuche }
+;  repeat
+;    WMem(a,$40); { Program Setup  }
+;    WMem(a,d);   { Write Data     }
+;    Pause(1);    { 15us warten    }
+;    WMem(a,$C0); { Program Verify }
+;    Pause(1);    { 15us warten    }
+;    o:=RMem(a);
+;    inc(cyc);
+;  until (o=d) or (cyc>max);
+;  asm STI end; {enable}
+;  ok:=not(cyc>max);
+;  WMem(0,0);     { Read }
+;end{WriteByte28F0x0};
+;
+;    while ok and (i<sizeof(puffer)) do begin
+;      WriteByte28F0x0(adr,$00);
+;      inc(i); inc(adr);
+;      if not ok then dec(adr);
+;    end;
+
+        org    $2100
+        ld      iy,$3B43    ; Kes_IOPB^.buffer_ptr
+        call    $0c29       ; 8086-Adresse in Z80-Adresse umrechnen; offset in HL und $3BE3, segment in A und $3BE2
+        out     ($1C),a     ; Host-Segment einstellen
+        ld      iy,($3B44)  ; Flash-Addr(bit0-11) <-- Kes_IOPB^.requested_bytes_l
+        ld      de,$800
+
+L0:     ld      c,25
+L1:     ld      a,($3B46)   ; Flash-Addr(bit12-20) <-- Kes_IOPB^.requested_bytes_h
+        out     ($b2),a
+        ld      a,$40
+        ld      (iy+0),a
+        ld      a,(hl)
+        ld      (iy+0),a
+        ld      b,30
+L2:     djnz    L2
+        ld      a,$C0
+        ld      (iy+0),a
+        ld      b,20
+L3:     djnz    L3
+        ld      a,(iy+0)
+        cp      a,(hl)
+        jr      z,L5
+        dec     c
+        jr      nz,L1
+        ld      a,0
+        out     ($b2),a
+        ld      ($9000),a
+L4:     ld      ($3B34),a   ; Status --> Kes_IOPB^.done_bytes_h
+        ld      hl,$800
+        xor     a,a
+        sbc     hl,de
+        ld      ($3B32),hl  ; Anzahl geschriebener Bytes --> Kes_IOPB^.done_bytes_l
+        out     ($1C),a     ; Host-Segment einstellen
+        ret
+
+L5:     ld      a,0
+        out     ($b2),a
+        ld      ($9000),a
+        inc     iy
+        inc     hl
+        ld      a,h
+        or      a,l
+        jr      nz,L6
+        ld      a,($3BE2)
+        inc     a
+        out     ($1C),a     ; Host-Segment einstellen
+        ld      h,$C0
+L6:     dec     e
+        jr      nz,L0
+        dec     d
+        jr      nz,L0
+        ld      a,1
+        jr      L4

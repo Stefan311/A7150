@@ -1,0 +1,85 @@
+;procedure ChipErase28F0x0;
+;var cyc     : word;
+;    EraseOK : boolean;
+;begin
+;  cyc:=0;
+;  adr:=0;
+;  repeat
+;    asm CLI end; {disable}
+;    WMem(adr,$20);   { Erase Setup }
+;    WMem(adr,$20);   { Erase Start }
+;    asm STI end; {enable}
+;    Pause(667);      { 10ms warten }
+;    repeat
+;      asm CLI end; {disable}
+;      WMem(adr,$A0); { Erase Verify }
+;      Pause(1);      { 15us warten  }
+;      EraseOK:=(RMem(adr)=$FF);
+;      if EraseOK then inc(adr) else inc(cyc);
+;      asm STI end; {enable}
+;    until (adr>=memsize) or not(EraseOK);
+;  until (adr>=memsize) or (cyc>1000);
+;  ok:=not(cyc>1000);
+;  if not ok then EraseFailure('Cycle limit exceeded at $'+ATH(adr));
+;  WMem($0,$00); { Read }
+;  WMem($0,$FF); { Reset }
+;  WMem($0,$FF); { Reset }
+;end{ChipErase28F0x0};
+
+        org    $2100
+
+        ld      c,0
+
+L0:     ld      a,($3B47)
+        out     ($B2),a
+        ld      hl,$9000
+
+L1:     ld      a,$20
+        ld      (hl),a
+        ld      (hl),a
+
+        ld      de,$1000    ; ~16ms
+L2:     dec     e
+        jr      nz,L2
+        dec     d
+        jr      nz,L2
+
+L3:     ld      a,$A0
+        ld      (hl),a
+
+        ld      b,5
+L4:     djnz    L4          ; ~20ys
+
+        ld      a,(hl)
+        cp      a,$FF
+        jr      z,L6
+
+        dec     c
+        jr      nz,L1
+L5:     ld      ($3B32),hl  ; Fehlerhafte Adresse --> Kes_IOPB^.done_bytes_l
+        ld      a,($3B47)
+        ld      ($3B34),a  ; Fehlerhafte Adresse --> Kes_IOPB^.done_bytes_h
+
+        ld      a,0
+        out     ($B2),a
+        ld      ($9000),a
+        ld      a,$FF
+        ld      ($9000),a
+        ld      ($9000),a
+        ret
+
+L6:     inc     hl
+        ld      a,$A0
+        cp      a,h
+        jr      nz,L3
+
+        ld      hl,$9000
+        ld      a,($3B46)  ; Flash-Laenge (bit12-20) <-- Kes_IOPB^.requested_bytes_h
+        ld      b,a
+        ld      a,($3B47)
+        inc     a
+        ld      ($3B47),a
+        out     ($B2),a
+        cp      a,b
+        jr      nz,L3
+        jr      L5

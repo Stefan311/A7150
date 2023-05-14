@@ -1,0 +1,67 @@
+;    procedure ChipErase;
+;    begin
+;      asm CLI end; {disable}
+;      if (dev<>$0B) then begin
+;        WMem($5555,$AA); { Software Data Protection Disable }
+;        WMem($2AAA,$55);
+;        WMem($5555,$80);
+;        WMem($5555,$AA);
+;        WMem($2AAA,$55);
+;        WMem($5555,$20);
+;      end;
+;      Pause(667);      { 10 ms Pause }
+;      WMem($5555,$AA); { Chip Erase }
+;      WMem($2AAA,$55);
+;      WMem($5555,$80);
+;      WMem($5555,$AA);
+;      WMem($2AAA,$55);
+;      WMem($5555,$10);
+;      Pause(66700);     { 1s warten (W49F002) }
+;      asm STI end; {enable}
+;    end;
+
+SEGPORT     equ     $B2
+SEGMEM      equ     $9000
+
+        org    $2100
+
+        ld      a,($3B44)  ; device id <-- Kes_IOPB^.requested_bytes_l
+        cp      a,$0B
+        jr      z,L2
+        ld      b,$80
+        call    T1
+        ld      b,$20
+        call    T1
+        ld      hl,$0A00
+L1:     dec     l
+        jr      nz,L1
+        dec     h
+        jr      nz,L1
+L2:     ld      b,$80
+        call    T1
+        ld      b,$10
+        call    T1
+        ld      a,4
+        ld      hl,0
+L3:     dec     l
+        jr      nz,L3
+        dec     h
+        jr      nz,L3
+        dec     a
+        jr      nz,L3
+        ret
+
+
+T1:     ld      a,5
+        out     (SEGPORT),a
+        ld      a,$AA
+        ld      (SEGMEM+$555),a
+        ld      a,2
+        out     (SEGPORT),a
+        ld      a,$55
+        ld      (SEGMEM+$AAA),a
+        ld      a,5
+        out     (SEGPORT),a
+        ld      a,b
+        ld      (SEGMEM+$555),a
+        ret

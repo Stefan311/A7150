@@ -1,0 +1,416 @@
+; *** Chip-Identifizierung *********************************************** 
+
+            org $2100
+
+MANU        equ     4
+DEVICE      equ     5
+INFO1       equ     6
+INFO2       equ     7
+SEGPORT     equ     $B2
+SEGMEM      equ     $9000
+
+ManAMD      equ     $01
+ManAS       equ     $52; Alliance Semiconductor 
+ManAtmel    equ     $1F
+ManCSI      equ     $31; Catalyst Semiconductor Inc.
+ManHyundai  equ     $AD
+ManIntel    equ     $89;
+ManMV       equ     $40; Mosel-Vitelic
+ManMX       equ     $C2; Macronix International Co. Ltd.
+ManSST      equ     $BF; Silicon Storage Technology
+ManSTM      equ     $20; SGS-Thomson Microelectronics
+ManMit      equ     $1C; Mitsubishi Electric
+ManWinbond  equ     $DA
+
+; IdentAMD1
+            call    pause10ms
+            ld      b,$F0
+            call    writeT1
+            call    pause15ys
+            ld      b,$90
+            call    writeT1
+            call    pause15ys
+            ld      a,0
+            out     (SEGPORT),a
+            ld      a,(SEGMEM)
+            ld      (iy+MANU),a
+            ld      a,(SEGMEM+1)
+            ld      (iy+DEVICE),a
+            ld      b,$F0
+            call    writeT1
+
+            ld      a,(iy+MANU)
+            cp      a,ManAMD
+            ret     z
+
+; IdentAMD2;
+            call    pause10ms
+            ld      a,0
+            out     (SEGPORT),a
+            ld      a,$FF
+            ld      (SEGMEM),a
+            call    pause15ys
+            ld      a,$90
+            ld      (SEGMEM),a
+            call    pause15ys
+            ld      a,(SEGMEM)
+            ld      (iy+MANU),a
+            ld      a,(SEGMEM+1)
+            ld      (iy+DEVICE),a
+            ld      a,$FF
+            ld      (SEGMEM),a
+
+            ld      a,(iy+MANU)
+            cp      a,ManAMD
+            ret     z
+
+; IdentAS
+            call    pause10ms
+            ld      b,0
+            call    writeT2
+            call    pause250ys
+            ld      b,2
+            call    writeT2
+            call    pause250ys
+            ld      a,$40
+            out     (SEGPORT),a
+            ld      a,(SEGMEM)
+            ld      (iy+MANU),a
+            ld      a,(SEGMEM+1)
+            ld      (iy+DEVICE),a
+            ld      b,0
+            call    writeT2
+            call    pause250ys
+
+            ld      a,(iy+MANU)
+            cp      a,ManAS
+            ret     z
+
+; IdentAtmel
+            call    pause10ms
+            ld      b,$90
+            call    writeT2
+            call    pause10ms
+            ld      a,0
+            out     (SEGPORT),a
+            ld      a,(SEGMEM)
+            ld      (iy+MANU),a
+            ld      a,(SEGMEM+1)
+            ld      (iy+DEVICE),a
+            ld      a,(SEGMEM+2)
+            ld      (iy+INFO1),a
+            ld      a,$1F
+            out     (SEGPORT),a
+            ld      a,(SEGMEM+$FF2)
+            ld      (iy+INFO2),a
+            ld      b,$F0
+            call    writeT2
+            call    pause10ms
+
+            ld      a,(iy+MANU)
+            cp      a,ManAtmel
+            ret     z
+
+; IdentCSI
+; IdentIntel
+; Mitzubishi
+            call    pause10ms
+            ld      a,0
+            out     (SEGPORT),a
+            ld      a,$FF
+            ld      (SEGMEM),a
+            ld      (SEGMEM),a
+            ld      a,$90
+            ld      (SEGMEM),a
+            ld      a,(SEGMEM)
+            ld      (iy+MANU),a
+            ld      a,(SEGMEM+1)
+            ld      (iy+DEVICE),a
+            ld      a,$FF
+            ld      (SEGMEM),a
+            ld      (SEGMEM),a
+
+            ld      a,(iy+MANU)
+            cp      a,ManCSI
+            ret     z
+
+            cp      a,ManIntel
+            ret     z
+
+            cp      a,ManMit
+            ret     z
+
+; IdentHyundai
+            call    pause10ms
+            ld      b,$F0
+            call    writeT2
+            call    pause10ys
+            ld      b,$90
+            call    writeT2
+            call    pause10ys
+            ld      a,$40
+            out     (SEGPORT),a
+            ld      a,(SEGMEM)
+            ld      (iy+MANU),a
+            ld      a,(SEGMEM+1)
+            ld      (iy+DEVICE),a
+            ld      b,$F0
+            call    writeT2
+            call    pause10ys
+
+            ld      a,(iy+MANU)
+            cp      a,ManHyundai
+            ret     z
+
+; IdentMV
+            call    pause10ms
+            ld      b,$90
+            call    writeT1
+            call    pause10ms
+            ld      a,0
+            out     (SEGPORT),a
+            ld      a,(SEGMEM)
+            ld      (iy+MANU),a
+            ld      a,(SEGMEM+1)
+            ld      (iy+DEVICE),a
+            ld      a,(iy+MANU)
+            ld      b,$F0
+            call    writeT1
+            call    pause10ms
+
+            ld      a,(iy+MANU)
+            cp      a,ManMV
+            ret     z
+
+; IdentMX1
+            call    pause10ms
+            ld      a,0
+            out     (SEGPORT),a
+            ld      a,$FF
+            ld      (SEGMEM),a
+            ld      (SEGMEM),a
+            ld      a,$90
+            ld      (SEGMEM),a
+            ld      a,(SEGMEM)
+            ld      (iy+MANU),a
+            ld      a,$FF
+            ld      (SEGMEM),a
+            ld      (SEGMEM),a
+            ld      a,$90
+            ld      (SEGMEM),a
+            ld      a,(SEGMEM+1)
+            ld      (iy+DEVICE),a
+            ld      a,$FF
+            ld      (SEGMEM),a
+            ld      (SEGMEM),a
+
+            ld      a,(iy+MANU)
+            cp      a,ManMX
+            ret     z
+
+; IdentMX2
+            call    pause10ms
+            ld      a,$45
+            out     (SEGPORT),a
+            ld      a,$F0
+            ld      (SEGMEM+$555),a
+            call    pause15ys
+            ld      b,$90
+            call    writeT2
+            call    pause15ys
+            ld      a,0
+            out     (SEGPORT),a
+            ld      a,(SEGMEM)
+            ld      (iy+MANU),a
+            ld      a,(SEGMEM+1)
+            ld      (iy+DEVICE),a
+            ld      a,$F0
+            ld      (SEGMEM+$555),a
+
+            ld      a,(iy+MANU)
+            cp      a,ManMX
+            ret     z
+
+; IdentSST1
+            call    pause10ms
+            ld      b,$F0
+            call    writeT1
+            call    pause15ys
+            ld      b,$80
+            call    writeT1
+            ld      b,$60
+            call    writeT1
+            call    pause15ys
+            ld      a,0
+            out     (SEGPORT),a
+            ld      a,(SEGMEM)
+            ld      (iy+MANU),a
+            ld      a,(SEGMEM+1)
+            ld      (iy+DEVICE),a
+            ld      b,$F0
+            call    writeT1
+            call    pause15ys
+
+            ld      a,(iy+MANU)
+            cp      a,ManSST
+            ret     z
+
+; IdentSST2
+            call    pause10ms
+            ld      a,0
+            out     (SEGPORT),a
+            ld      a,$FF
+            ld      (SEGMEM),a
+            call    pause15ys
+            ld      a,$90
+            ld      (SEGMEM+1),a
+            ld      a,(SEGMEM)
+            ld      (iy+MANU),a
+            ld      a,(SEGMEM+1)
+            ld      (iy+DEVICE),a
+            ld      a,$FF
+            ld      (SEGMEM),a
+            call    pause15ys
+
+            ld      a,(iy+MANU)
+            cp      a,ManSST
+            ret     z
+
+; IdentSST3
+            call    pause10ms
+            ld      b,$90
+            call    writeT1
+            call    pause10ms
+            ld      a,0
+            out     (SEGPORT),a
+            ld      a,(SEGMEM)
+            ld      (iy+MANU),a
+            ld      a,(SEGMEM+1)
+            ld      (iy+DEVICE),a
+            ld      b,$F0
+            call    writeT1
+            call    pause10ms
+
+            ld      a,(iy+MANU)
+            cp      a,ManSST
+            ret     z
+
+; IdentST1
+            call    pause10ms
+            ld      a,0
+            out     (SEGPORT),a
+            ld      a,$90
+            ld      (SEGMEM),a
+            call    pause15ys
+            ld      a,(SEGMEM)
+            ld      (iy+MANU),a
+            ld      a,(SEGMEM+1)
+            ld      (iy+DEVICE),a
+            ld      a,$FF
+            ld      (SEGMEM),a
+            call    pause15ys
+
+            ld      a,(iy+MANU)
+            cp      a,ManSTM
+            ret     z
+
+; IdentST2
+            call    pause10ms
+            ld      b,$F0
+            call    writeT2
+            call    pause15ys
+            ld      b,$90
+            call    writeT2
+            call    pause15ys
+            ld      a,0
+            out     (SEGPORT),a
+            ld      a,(SEGMEM)
+            ld      (iy+MANU),a
+            ld      a,(SEGMEM+1)
+            ld      (iy+DEVICE),a
+            ld      b,$F0
+            call    writeT2
+
+            ld      a,(iy+MANU)
+            cp      a,ManSTM
+            ret     z
+
+; IdentWin
+            call    pause10ms
+            ld      b,$F0
+            call    writeT1
+            call    pause15ys
+            ld      b,$80
+            call    writeT1
+            ld      b,$60
+            call    writeT1
+            call    pause15ys
+            ld      a,0
+            out     (SEGPORT),a
+            ld      a,(SEGMEM)
+            ld      (iy+MANU),a
+            ld      a,(SEGMEM+1)
+            ld      (iy+DEVICE),a
+            ld      b,$F0
+            call    writeT1
+            call    pause15ys
+
+            ld      a,(iy+MANU)
+            cp      a,ManWinbond
+            ret     z
+
+            ld      a,0
+            ld      (iy+MANU),a
+            ld      (iy+DEVICE),a
+            ret
+
+writeT1:    ld      a,5
+            out     (SEGPORT),a
+            ld      a,$AA
+            ld      (SEGMEM+$555),a
+            ld      a,2
+            out     (SEGPORT),a
+            ld      a,$55
+            ld      (SEGMEM+$AAA),a
+            ld      a,5
+            out     (SEGPORT),a
+            ld      a,b
+            ld      (SEGMEM+$555),a
+            ret
+
+writeT2:    ld      a,$45
+            out     (SEGPORT),a
+            ld      a,$AA
+            ld      (SEGMEM+$555),a
+            ld      a,$42
+            out     (SEGPORT),a
+            ld      a,$55
+            ld      (SEGMEM+$AAA),a
+            ld      a,$45
+            out     (SEGPORT),a
+            ld      a,b
+            ld      (SEGMEM+$555),a
+            ret
+
+; 60takte
+pause15ys:  ld      b,4
+pause_1:    djnz    pause_1
+            ret
+
+; 40takte
+pause10ys:  ld      b,3
+pause_2:    djnz    pause_2
+            ret
+
+; 40000takte 
+pause10ms:  ld      hl,$0B00
+pause_3:    dec     l
+            jr      nz,pause_3
+            dec     h
+            jr      nz,pause_3
+            ret
+
+; 1000takte
+pause250ys: ld      b,76
+pause_4:    djnz    pause_4
+            ret

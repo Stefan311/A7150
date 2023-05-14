@@ -1,4 +1,3 @@
-
 procedure Schreiben;
 
   procedure WriteAMD;
@@ -12,61 +11,24 @@ procedure Schreiben;
   begin { WriteAS }
   end;
 
+  {$I fl_sst1.inc}
+  {$I fl_at1.inc}
+  {$I fl_at2.inc}
+
   procedure WriteAtmel;
-  var s,pagesize : word;
-    procedure WritePage;
-    var n : word;
-        t : longint;
-    begin
-      asm CLI end; {disable}
-      WMem($5555,$AA);
-      WMem($2AAA,$55);
-      WMem($5555,$A0);
-      for n:=1 to pagesize do begin
-        WMem(adr,puffer[i]);
-        inc(adr); inc(i);
-      end;
-      Pause(20); { 330 us warten }
-      asm STI end; {enable}
-      t:=tick+2; { ca. 50ms Time-Out fuer Page-Write }
-      repeat until (RMem(adr-1)=puffer[i-1]) or (tick>t);
-      if (tick>t) then ok:=false;
-      asm CLI end; {disable}
-      WMem($5555,$AA);
-      WMem($2AAA,$55);
-      WMem($5555,$F0);
-      asm STI end; {enable}
-    end;
-    procedure WritePuffer;
-    var t : longint;
-    begin
-      while ok and (i<s) do begin
-        asm CLI end; {disable}
-        WMem($5555,$AA);
-        WMem($2AAA,$55);
-        WMem($5555,$A0);
-        WMem(adr,puffer[i]);
-        asm STI end; {enable}
-        t:=tick+2; { ca. 50ms Time-Out (jenseits von gut und boese) fuer Byte-Write }
-        repeat until (RMem(adr)=puffer[i]) or (tick>t);
-        if (tick>t) then ok:=false;
-        inc(adr); inc(i);
-      end;
-    end;
+  var s: word;
   begin { WriteAtmel }
-    case dev of $5D,$D5         : pagesize:=128; { AT29C512/C010A }
-                $DA,$A4         : pagesize:=256; { AT29C020/40A }
-    end{case};
     i:=sizeof(puffer); s:=sizeof(puffer);
-    while ok and (adr<memsize) do begin
+    while ok and (adr<datsize) do begin
       if (i>=s) and (adr<=(memsize-s)) then begin
         fread;
         i:=0;
       end;
       write(ATH(adr));
-      case dev of $5D,$D5,$DA,$A4 : WritePage;   { AT29C512/C010/20/40A }
+      case dev of $5D,$D5 : Flash_Kes(fl_at1);   { AT29C512/C010 }
+                  $DA,$A4 : Flash_Kes(fl_at2);   { AT29C20/40A }
                   $05,$04,$07,$08,
-                  $17,$0B,$13,$12 : WritePuffer; { AT49F001/2, AT49F010/20/40 }
+                  $17,$0B,$13,$12 : Flash_Kes(fl_sst1); { AT49F001/2, AT49F010/20/40 }
       end{case};
       write(#8#8#8#8#8#8);
     end;
@@ -103,38 +65,16 @@ procedure Schreiben;
 
   procedure WriteMV;
   var s : word;
-    procedure WritePage;
-    var t : longint;
-        b : byte;
-    begin
-      while ok and (i<s) do begin
-        b:=puffer[i];
-        asm CLI end; {disable}
-        WMem($5555,$AA);
-        WMem($2AAA,$55);
-        WMem($5555,$A0);
-        WMem(adr,b);
-        asm STI end; {enable}
-        t:=tick+2; { ca. 50ms Time-Out fuer Byte-Write }
-        repeat until (RMem(adr)=b) or (tick>t);
-        asm CLI end; {disable}
-        WMem($5555,$AA);
-        WMem($2AAA,$55);
-        WMem($5555,$F0);
-        asm STI end; {enable}
-        if (tick>t) then ok:=false;
-        inc(adr); inc(i);
-      end;
-    end;
+  {$I fl_mv.inc}
   begin { WriteMV }
     s:=sizeof(puffer); i:=s;
-    while ok and (adr<memsize) do begin
+    while ok and (adr<datsize) do begin
       if (i>=s) and (adr<=(memsize-s)) then begin
         fread;
         i:=0;
       end;
       write(ATH(adr));
-      WritePage;
+      Flash_Kes(fl_mv);
       write(#8#8#8#8#8#8);
     end;
     write(ATH(adr)); writeln;
@@ -142,60 +82,8 @@ procedure Schreiben;
   end;
 
   procedure WriteSST;
-    procedure WritePage128;
-    var n : word;
-        t : longint;
-    begin
-      asm CLI end; {disable}
-      WMem($5555,$AA);
-      WMem($2AAA,$55);
-      WMem($5555,$A0);
-      for n:=0 to 127 do begin
-        WMem(adr,puffer[i]);
-        inc(adr); inc(i);
-      end;
-      Pause(20); { 330 us warten }
-      asm STI end; {enable}
-      t:=tick+2; { ca. 50ms Time-Out fuer Page-Write }
-      repeat until (RMem(adr-1)=puffer[i-1]) or (tick>t);
-      if (tick>t) then ok:=false;
-      asm CLI end; {disable}
-      WMem($5555,$AA);
-      WMem($2AAA,$55);
-      WMem($5555,$F0);
-      asm STI end; {enable}
-    end;
-    procedure WritePuffer;
-    var t : longint;
-    begin
-      while ok and (i<sizeof(puffer)) do begin
-        asm CLI end; {disable}
-        WMem(adr,$10); { Byte Program }
-        WMem(adr,puffer[i]);
-        asm STI end; {enable}
-        t:=tick+2; { ca. 50ms Time-Out (jenseits von gut und boese) fuer Byte-Write }
-        repeat until (RMem(adr)=puffer[i]) or (tick>t);
-        if (tick>t) then ok:=false;
-        inc(adr); inc(i);
-      end;
-    end;
-    procedure WriteKes;
-    {$I sstflash.inc}
-    begin
-      Kes_Buffer_Clear;
-      Kes_Load_Exec_Const(sstflash);
-      for i:=0 to sizeof(puffer)-1 do
-        Kes_Data[i+256]:=puffer[i];
-      Kes_Data[$F0]:=adr SHR 12;
-      Kes_Data[$F1]:=adr AND $FF;
-      Kes_Data[$F2]:=((adr SHR 8) AND $0F) OR $90;
-      Kes_Buffer_Transfer(true,sizeof(puffer)+256);
-      Kes_Exec;
-      Kes_Buffer_Transfer(false,256);
-      ok:=Kes_Data[$F3]=1;
-      i:=Kes_Data[$F4]+(Kes_Data[$F5] SHL 8);
-      adr:=adr+i;
-    end;
+  {$I fl_sst2.inc}
+  {$I fl_sst3.inc}
   begin { WriteSST }
     i:=sizeof(puffer);
     while ok and (adr<datsize) do begin
@@ -204,9 +92,9 @@ procedure Schreiben;
         i:=0;
       end;
       write(ATH(adr));
-      case dev of $07,$10     : WritePage128; { PH29EE010/020 }
-                  $04         : WritePuffer;  { PH28SF040 }
-                  $B5,$B6,$B7 : WriteKes; { PH39SF010/20 }
+      case dev of $07,$10     : Flash_Kes(fl_sst3); { PH29EE010/020 }
+                  $04         : Flash_Kes(fl_sst2); { PH28SF040 }
+                  $B5,$B6,$B7 : Flash_Kes(fl_sst1); { PH39SF010/20 }
       end;
       write(#8#8#8#8#8#8);
     end;
@@ -231,43 +119,18 @@ procedure Schreiben;
   end;
 
   procedure WriteWinbond;
-  var pagesize : word;
-    procedure WritePage;
-    var n : word;
-        t : longint;
-    begin
-      asm CLI end; {disable}
-      WMem($5555,$AA);
-      WMem($2AAA,$55);
-      WMem($5555,$A0);
-      for n:=1 to pagesize do begin
-        WMem(adr,puffer[i]);
-        inc(adr); inc(i);
-      end;
-      Pause(667); { 10ms warten }
-      asm STI end; {enable}
-      t:=tick+2; { ca. 50ms Time-Out fuer Page-Write }
-      repeat until (RMem(adr-1)=puffer[i-1]) or (tick>t);
-      if (tick>t) then ok:=false;
-      asm CLI end; {disable}
-      WMem($5555,$AA);
-      WMem($2AAA,$55);
-      WMem($5555,$F0);
-      asm STI end; {enable}
-    end;
     procedure WriteWinPage;
     begin
-      case dev of $C1,$45 : pagesize:=128;
-                  $46     : pagesize:=256;
       end{case};
       i:=sizeof(puffer);
-      while ok and (adr<memsize) do begin
+      while ok and (adr<datsize) do begin
         if (i>=sizeof(puffer)) and (adr<=(memsize-sizeof(puffer))) then begin
           fread;
           i:=0;
         end;
         write(ATH(adr));
-        WritePage;
+        case dev of $C1,$45 : Flash_Kes(fl_at1);
+                    $46     : Flash_Kes(fl_at2);
         write(#8#8#8#8#8#8);
       end;
       write(ATH(adr)); writeln;
@@ -276,6 +139,12 @@ procedure Schreiben;
   begin { WriteWinbond }
     case dev of $C1,$45,$46 : WriteWinPage;
                 $0B         : WriteByteAMD; { W49F002 }
+    end;
+  end;
+
+  procedure WriteMitsubi;
+  begin
+    case dev of $D0 : Write28F0x0; { M5M28F101 }
     end;
   end;
 
@@ -298,6 +167,7 @@ begin
               SST      : WriteSST;
               STM      : WriteSTM;
               Winbond  : WriteWinbond;
+              Mitsubi  : WriteMitsubi;
   end;
   close(infile);
 end;
