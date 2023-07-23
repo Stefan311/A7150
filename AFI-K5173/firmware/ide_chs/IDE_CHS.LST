@@ -1,7 +1,7 @@
 AS80 Assembler for i8080 [1.40].                                     Page    1
 -------------------------------- IDE_CHS.Z80 ---------------------------------
 
-1686 lines read, no errors in pass 1.
+1742 lines read, no errors in pass 1.
 No errors in pass 2.
 Wrote binary from address $5000 through $5fff.
 Total size 4096 bytes.

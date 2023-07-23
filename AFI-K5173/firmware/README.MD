@@ -33,12 +33,12 @@ Hinweise:
 + da die aufwändige CHS-Umrechnung durch die IDE-Platte selber gemacht wird, ist der CHS-Modus etwas schneller als der LBA-Modus.
 + Es sind nur CHS-Parameter Kombinationen erlaubt, die durch die IDE-Interne CHS-Translation erlaubt sind. Welche das sind, hängt von den eingesetzten Festplatten ab. Die Platten, die ich bisher getestet habe, fressen ALLES.
 + Durch die CHS-Translation sind damit Beschriebene Platten relativ gut PC-Kompatibel
-+ Platten, die mit Version 0.1 beschrieben worden sind, sind mit 0.2 nicht mehr lesbar.
++ Platten, die mit Version 0.1 beschrieben worden sind, sind ab 0.2 nicht mehr lesbar.
 
 Features:
 + Schalterstellungen: 0=MFM, 1=Primary IDE, 2=Secundary IDE
 + IDE-Adressmodus: CHS
-+ Datentransfer mit Z80-DMA in den KES-Buffer
++ Datentransfer mit Z80-DMA direkt in den Hostspeicher (~380KB/s)
 + Kanal B-Support für die CH375 USB-Platine
 
 ---

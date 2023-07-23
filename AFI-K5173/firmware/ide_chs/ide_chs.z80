@@ -1,4 +1,4 @@
-; Copyright (c) 2022, Stefan Berndt
+; Copyright (c) 2022-2023, Stefan Berndt
 ;
 ; All rights reserved.
 ;
@@ -24,7 +24,7 @@
 
 
 ; *********  Firmware fuer IDE-Kontroller AFI-K5173   ***********
-; HINWEISE: 
+; HINWEISE:
 ; 1. der CHS-Modus ist nicht mehr Bestandteil der ATA-Spezifikation, allerdings 
 ;    scheinen auch moderne IDE-Platten diesen Modus immer noch zu unterstuetzen.
 ; 2. da die aufwaendige CHS-Umrechnung durch die IDE-Platte selber gemacht wird, 
@@ -33,21 +33,26 @@
 ;    CHS-Translation erlaubt sind. Welche das sind, haengt von den eingesetzten
 ;    Festplatten ab. Die Platten, die ich bisher getestet habe, fressen ALLES.
 ; 4. Durch die CHS-Translation sind damit Beschriebene Platten relativ gut PC-Kompatibel
-; 5. Platten, die mit Version 0.1 beschrieben worden sind, sind mit 0.2 nicht mehr lesbar.
+; 5. Platten, die mit Version 0.1 beschrieben worden sind, sind ab 0.2 nicht mehr lesbar.
 ;
-; Version: 0.2
+; Version: 0.4
 ; Features:
 ; - Schalterstellungen: 0=MFM, 1=Primary IDE, 2=Secundary IDE
 ; - IDE-Adressmodus: CHS
-; - Datentransfer mit Z80-DMA in den KES-Buffer
+; - Datentransfer mit Z80-DMA direkt in den Hostspeicher (~380KB/s)
+; - Unterstuetzung des Kanal B fuer den USB-Kontroller
 ;
 ; Version Log:
 ; V0.1
-; Basisversion abgeleitet von IDE V0.3 / V0.4
+; Basisversion abgeleitet von IDE(LBA) V0.3 / V0.4
 ; V0.2
 ; Diese Version nutzt jetzt das CHS-Translation Feature der IDE-Platten
 ; V0.3
 ; Support zur Nutzung des Kanal B fuer den USB-Kontroller
+; V0.4
+; Mehrere IDE-Sektoren am Stueck verarbeiten
+; DMA-Transfers direkt in den Hostspeicher
+; Debug-Log entfernt
 
 ; ***************************************************************
 ; Schalter fuer Features:
@@ -55,14 +60,17 @@ CHAN2Interface  equ     1               ; 0 = deaktivieren, 1 = aktivieren
 
 ; ***************************************************************
 ; Parameter von und zur KES
+ERRORREG        equ     $3b22
+BYTECOUNT       equ     $3b2e+4
+BUFFER          equ     $3b2e+6
 FUNKTIONSCODE   equ     $3b2e+11
 LAUFWERKNR      equ     $3b2e+10
 CYLINDER        equ     $3b2e+14
 HEAD            equ     $3b2e+16
 SECTOR          equ     $3b2e+17        ; werden bei KES-Festplatte von 0 gezaehlt!
-BYTECOUNT       equ     $3b2e+4
-BUFFER          equ     $3b2e+6
-ERRORREG        equ     $3b22
+KHOSTOFS        equ     $3b2e+18        ; Buffer im HOST-Speicher, schon in KES-Mapping umgerechnet, MEM-Teil
+KHOSTSEG        equ     $3b2e+20        ; Buffer im HOST-Speicher, schon in KES-Mapping umgerechnet, IO-Teil
+ALLBYTECOUNT    equ     $3b2e+22        ; Gesamtanzahl bytes
 
 ; Speicher fuer AFI
 MSECCOUNT       equ     $3a06
@@ -71,13 +79,14 @@ MIDE_DEVICE     equ     $3a08           ; 8bit: 0=Primary(Master)  $10=Secondary
 MHEADCT         equ     $3a10           ; Anzahl Koepfe
 MSECTORCT       equ     $3a11           ; Anzahl Sektoren pro Spur
 MCYLINDERCT     equ     $3a12           ; Anzahl Zylinder
-MDMA_PARAM      equ     $3a40           ; 21 bytes, Kopie von dma_param_st
-MBUFFER         equ     $3a42           ; Addresse Sektorbuffer, liegt mit Absicht mittem in den DMA-Parametern
-MDMA_DIR        equ     $3a52           ; Transfer-Richtung, liegt mit Absicht mittem in den DMA-Parametern
 
-MERRORSTART     equ     $3510           ; Beginn Errorlog-Ringbuffer
-MERRORENDE      equ     $39df           ; Ende Errorlog-Ringbuffer
-MERRORPTR       equ     $3500           ; Zeiger auf naechste Addresse im Ringpuffer
+MDMA_PARAM      equ     $3a40           ; 21 bytes, Kopie von dma_param_st
+MDMA_MEM_ADR    equ     MDMA_PARAM+2
+MDMA_BLK_LEN    equ     MDMA_PARAM+4
+MDMA_MEM_FLAG   equ     MDMA_PARAM+7
+MDMA_MUX_FLAG   equ     MDMA_PARAM+16
+MDMA_DIR        equ     MDMA_PARAM+18
+MDMA_PAR_COUNT  equ     21*256
 
 ; IO-Register
 REG_DATA        equ     $B0             ; IO-Port IDE-Daten (Lesen und Schreiben)
@@ -98,21 +107,18 @@ REG_USB         equ     $B3             ; IO-Port USB-Platine
 
 ; ***************************************************************
 ; KES-Reset-Routine
-Reset:          ld      a,$18           ; IDE-Reset Signal
+Reset:          ld      a,$38
                 out     (REG_STEUER),a
+                ld      (MIDE_STEUER),a
 
                 ld      hl,dma_param_st
                 ld      de,MDMA_PARAM
                 ld      bc,dma_param_en-dma_param_st
                 ldir
-
+                
     if  CHAN2Interface=1
                 call    Chan2Reset
     endif
-
-                ld      a,$38
-                out     (REG_STEUER),a
-                ld      (MIDE_STEUER),a
 
                 in      a,(REG_SWITCH)  ; Betriebsarten-Schalter
                 and     a,$f0
@@ -156,29 +162,49 @@ HDDService_0:   ld      a,(FUNKTIONSCODE)
                 cp      a,0             ; Init?
                 jr      z,HDD_Init
                 cp      a,2             ; Format?
-                jr      z,HDD_OK
+                jr      z,IDE_OKEnde
                 cp      a,3             ; Sektor-Id lesen?
                 jp      z,HDD_SektorId
                 cp      a,4             ; Lesen Host?
-                jp      z,HDD_Transfer
+                jp      z,IDE_Transfer
                 cp      a,5             ; Lesen Kes?
-                jp      z,HDD_Transfer
+                jp      z,IDE_Transfer
                 cp      a,6             ; Schreiben Host?
-                jp      z,HDD_Transfer
+                jp      z,IDE_Transfer
                 cp      a,7             ; Schreiben Kes?
-                jp      z,HDD_Transfer
+                jp      z,IDE_Transfer
                 cp      a,8             ; Seek?
-                jr      z,HDD_OK
+                jr      z,IDE_OKEnde
                 cp      a,15            ; Diagnostik?
-                jr      z,HDD_OK
+                jr      z,IDE_OKEnde
                 ld      bc,$0800        ; alle anderen Funktionen: Errorcode: Parameterfehler
-                ld      d,1
-                call    ErrorLog
-                jp      HDD_Ende
 
-HDD_OK:         ld      bc,0            ; Errorcode: kein Fehler
-                jp      HDD_Ende
-                
+
+; ***************************************************************
+; Errorcode (bc) schreiben und Ende
+Service_Ende:   ld      a,(MIDE_STEUER)
+                and     a,$3f           ; LEDs aus
+                ld      (MIDE_STEUER),a
+                out     (REG_STEUER),a
+                ld      (ERRORREG),bc
+                ld      a,0
+                ld      (ERRORREG+2),a
+                ld      hl,(CYLINDER)
+                ld      (ERRORREG+7),hl
+                ld      hl,(HEAD)
+                ld      (ERRORREG+9),hl
+                ld      a,b
+                or      a,c             ; Zero-Flagg=1 heisst fehlerfrei, Carry-Flag=0 heisst kein Diskwechsel
+                ret
+
+IDE_OKEnde:     ld      bc,0            ; Errorcode: kein Fehler
+                jr      Service_Ende
+IDE_ReadOnly:   ld      bc,$8000        ; Errorcode: Schreibschutz aktiv
+                jr      Service_Ende
+IDE_NotReady:   ld      bc,$4000        ; Errorcode: Device nicht bereit
+                jr      Service_Ende
+IDE_NotFound:   ld      bc,$1000        ; Errorcode: Sektor nicht gefunden
+                jr      Service_Ende
 
 ; ***************************************************************
 ; HDD Initialisieren
@@ -209,10 +235,7 @@ HDD_Init_1:     ld      b,$16
                 jr      nz,HDD_Init_1
                 dec     d
                 jr      nz,HDD_Init_1   ; bis zu 40 Sekunden warten. 
-                ld      bc,$4000        ; Errorcode: Device nicht bereit
-                ld      d,2
-                call    ErrorLog
-                jp      HDD_Ende
+                jr      IDE_NotReady
 
 HDD_Init_2:     ld      ix,(BUFFER)
                 ld      a,(ix+2)        ; Heads
@@ -231,7 +254,13 @@ HDD_Init_2:     ld      ix,(BUFFER)
                 ld      b,$17
                 call    IDE_Setreg      ; ins Sektorcount-Register
                 call    IDE_Wait_Rdy
-                jp      HDD_OK
+
+                ld      hl,(BUFFER)
+                ld      bc,16
+                ld      de,$3ee0
+                ldir
+
+                jp      IDE_OKEnde
 
 ; ***************************************************************
 ; Sektor-ID lesen (Fake-Funktion)
@@ -239,142 +268,243 @@ HDD_SektorId:   ld      de,(BUFFER)
                 ld      hl,HDD_FakeID
                 ld      bc,5
                 ldir
-                jp      HDD_OK
+                jp      IDE_OKEnde
 
 HDD_FakeID:     dw      0               ; Zylinder
                 db      0               ; Head
                 db      1               ; Sektor
                 db      $20             ; Flags: normaler Sektor, 512 bytes
 
-
 ; ***************************************************************
 ; HDD lesen oder schreiben vorbereiten
-HDD_Transfer:   ld      hl,(CYLINDER)   ; Start-CHS muss im ERROR-Register zurueckgegeben werden
+IDE_Transfer:   ld      e,a
+
+                ld      hl,(CYLINDER)   ; Start-CHS muss im ERROR-Register zurueckgegeben werden
                 ld      (ERRORREG+3),hl
                 ld      hl,(HEAD)       ; das ist auch noch +SEKTOR
                 ld      (ERRORREG+5),hl
 
-                ld      hl,(BUFFER)     ; Start-Buffer-Pointer privat speichern, im KES-Parameter-Block soll nicht geaendert werden
-                ld      (MBUFFER),hl
-                ld      a,(BYTECOUNT+1) ; High-Byte Bytecounter
-                sra     a               ; /2, damit haben wir den 512-Byte-Block-Counter
+                ld      a,(ALLBYTECOUNT+1) ; High-Byte Bytecounter (Gesamtauftrag)
+                bit     0,e
+                jr      z,IDE_Trans_1
+                ld      a,(BYTECOUNT+1) ; High-Byte Bytecounter (Einzelauftrag)
+IDE_Trans_1:    srl     a               ; /2, damit haben wir den 512-Byte-Block-Counter
+                jr      z,IDE_NotFound
+
                 ld      (MSECCOUNT),a 
-                jp      nz,HDD_Transfer_1; Leseversuche mit einzelnen 128-Byte Sektoren gibt hier 0 Sektoren
-                ld      bc,$1000        ; wir machen nur 512-Byte-Sektoren, also: Errorcode: Sektor nicht gefunden
-                ld      d,3
-                call    ErrorLog
-                jp      HDD_Ende
+                jr      IDE_Trans_2
 
-HDD_Transfer_1: ld      a,(MIDE_DEVICE)
-                ld      b,$16
-                call    IDE_Setreg
-                ld      c,$17
-                call    IDE_Getreg
-                bit     3,a
-                jp      z,HDD_Transfer_4
-                ld      hl,$8000
-                ld      c,REG_DATA
-                ld      b,0
-                inir
-                inir
-                otir
-                otir
-                jr      HDD_Transfer_1
-HDD_Transfer_4: bit     6,a
-                jp      nz,HDD_Transfer_5
-                ld      bc,$4000        ; Errorcode: Device nicht bereit
-                ld      d,4
-                call    ErrorLog
-                jp      HDD_Ende
-HDD_Transfer_5: call    SetCHS
-                ld      b,$12           ; IDE-Register: Anzahl Sektoren
-                ld      a,1             ; nur ein Sektor
-                call    IDE_Setreg
-                ld      a,(FUNKTIONSCODE)
-                bit     1,a             ; lesen oder schreiben?
-                jr      z,HDD_Transfer_2
-
-
-; ***************************************************************
-; Sektor schreiben
+IDE_Trans_2:    call    IDE_CheckReady
+                jr      z,IDE_NotReady
                 ld      a,(MIDE_STEUER)
-                or      a,$80           ; LED 2 an
-                ld      (MIDE_STEUER),a
-                ld      b,$17
-                ld      a,$30           ; IDE-Kommando: Sektor schreiben
-                call    IDE_Setreg
-                call    IDE_Wait4Data
-                ld      b,$05           ; DMA Richtung: B-->A
-                call    IDE_DMA
-                call    IDE_Wait_Rdy                
-
-                jr      HDD_Transfer_3
-
-                
-; ***************************************************************
-; Sektor lesen
-HDD_Transfer_2: ld      a,(MIDE_STEUER)
+                bit     1,e             ; Lesefunktion?
+                jr      nz,IDE_Trans_3
                 or      a,$40           ; LED 1 an
-                ld      (MIDE_STEUER),a
-                ld      b,$17
-                ld      a,$20           ; IDE-Kommando: Sektor lesen
+IDE_Trans_3:    bit     1,e             ; Schreibfunktion?
+                jr      z,IDE_Trans_4
+                or      a,$80           ; LED 2 an
+IDE_Trans_4:    ld      (MIDE_STEUER),a
+                call    IDE_SetCHS
+                ld      a,$20           ; IDE-Kommando: Sektor lesen (CHS/LBA28)
+                bit     1,e
+                jr      z,IDE_Trans_8
+                ld      a,$30           ; IDE-Kommando: Sektor schreiben (CHS/LBA28)
+IDE_Trans_8:    ld      b,$17
                 call    IDE_Setreg
-                call    IDE_Wait4Data
-                ld      b,$01           ; DMA Richtung: A-->B
-                call    IDE_DMA
+IDE_Trans_9:    call    IDE_Wait4Data
+                jr      nc,IDE_NotReady
+                bit     0,e
+                jr      z,IDE_Trans_10
+                call    IDE_KES_DMA
+                jr      nc,IDE_NotFound
+                call    IDE_AddCHS
+                jr      IDE_OKEnde
 
-
-; ***************************************************************
-; nach Sektor-Transfer
-HDD_Transfer_3: ld      a,(MIDE_STEUER)
-                and     a,$E0
-                or      a,$17
-                out     (REG_STEUER),a
-                in      a,(REG_RESET)
-                in      a,(REG_DATA)
-                bit     0,a
-                jr      z,HDD_Transfer_6
-                ld      d,8
-                ld      bc,$1000
-                call    ErrorLog
-                jr      HDD_Ende
-                
-
-HDD_Transfer_6: call    IncCHS
-                ld      hl,(MBUFFER)
-                inc     h
-                inc     h
-                ld      (MBUFFER),hl
-                ld      a,(MSECCOUNT)
-                dec     a
-                ld      (MSECCOUNT),a
-                jr      nz,HDD_Transfer_1; Fertig?
-
-                ld      bc,0            ; Errorcode: kein Fehler
-
-            
-; ***************************************************************
-; Errorcode (bc) schreiben und Ende
-HDD_Ende:       ld      a,(MIDE_STEUER)
+IDE_Trans_10:   call    IDE_HOST_DMA
+                ld      bc,0            ; Errorcode: Kein Fehler
+                jr      c,IDE_Trans_11
+                ld      bc,$1000        ; Errorcode: Sektor nicht gefunden
+IDE_Trans_11:   ld      a,(MIDE_STEUER)
                 and     a,$3f           ; LEDs aus
                 ld      (MIDE_STEUER),a
                 out     (REG_STEUER),a
                 ld      (ERRORREG),bc
                 ld      a,0
                 ld      (ERRORREG+2),a
-                ld      hl,(CYLINDER)
-                ld      (ERRORREG+7),hl
-                ld      hl,(HEAD)
-                ld      (ERRORREG+9),hl
-                ld      a,b
-                or      a,c             ; Zero-Flagg=1 heisst fehlerfrei
-                scf                     ; Carry gesetzt heisst Diskettenwechsel erkannt
-                ccf                     ; ... kann uns aber nicht passieren
+                ld      a,(MSECCOUNT)
+                sla     a
+                ld      d,a
+                ld      e,0             ; Anzahl verbleibende Bytes nach DE, wird in $0B1F verarbeitet
+                pop     hl              ; Ruecksprung zu $0BD5
+                pop     hl              ; Ruecksprung zu $09A3 / $09EF
+                jr      $0B1F           ; Bytecounter und Fehlerstatus zum Host kopieren und Ende
+
+
+; ***************************************************************
+; DMA vom/zum KES-Speicher
+IDE_KES_DMA:    ld      a,$4E           ; Port A: 2 Cycle, voll IORQ, voll MREQ, voll RD, halb WR
+                ld      (MDMA_MEM_FLAG),a
+                ld      a,$82           ; READY active High
+                ld      (MDMA_MUX_FLAG),a
+                ld      hl,(BUFFER)
+                ld      (MDMA_MEM_ADR),hl
+                ld      a,(MIDE_STEUER)
+                and     a,$E0
+                or      a,$30
+                out     (REG_STEUER),a  ; Daten-Register anwaehlen
+                in      a,(REG_RESET)
+                ld      a,$01           ; DMA Richtung: A-->B
+                bit     1,e
+                jr      z,IDE_KES_DMA_1
+                ld      a,$05           ; DMA Richtung: B-->A
+IDE_KES_DMA_1:  ld      (MDMA_DIR),a
+                ld      hl,MDMA_PARAM   ; Addresse DMA-Paramter
+                ld      bc,MDMA_PAR_COUNT; Anzahl DMA-Parameter und Controller-Port (0)
+                otir
+IDE_KES_DMA_2:  ld      a,(MSECCOUNT)
+                dec     a
+                ld      (MSECCOUNT),a   ; Sektor-Anzahl runterzaehlen
+                jr      z,IDE_KES_DMA_3
+                call    IDE_Wait4Data
+                jr      nc,IDE_KES_DMA_4
+                ld      a,(MIDE_STEUER)
+                and     a,$E0
+                or      a,$30
+                out     (REG_STEUER),a  ; wieder Daten-Register anwaehlen
+                in      a,(REG_RESET)
+                ld      a,$83           ; DMA-Kommando: Stop
+                out     (0),a
+                ld      a,$D3           ; DMA-Kommando: Continue (resettet den Bytecounter)
+                out     (0),a
+                ld      a,$87           ; DMA-Kommando: Start
+                out     (0),a
+                jr      IDE_KES_DMA_2
+IDE_KES_DMA_3:  bit     1,e
+                scf
+IDE_KES_DMA_4:  ld      a,$01           ; Port A: 3 Cycle, halb IORQ, halb MREQ, halb RD, halb WR
+                ld      (MDMA_MEM_FLAG),a
+                ld      a,$92           ; READY active High, multiplexed
+                ld      (MDMA_MUX_FLAG),a
+                ret     z
+                jp      IDE_Wait_Rdy	; bei Schreiben auf fertig-Meldung warten
+
+
+; ***************************************************************
+; DMA direkt vom/zum Host-Speicher
+IDE_HOST_DMA:   ld      hl,(KHOSTOFS)
+                ld      (MDMA_MEM_ADR),hl
+                ld      a,(KHOSTSEG)
+                out     (REG_HOSTSEL),a
+                ld      a,$01           ; DMA Richtung: A-->B
+                bit     1,e
+                jr      z,IDE_HOST_DMA_1
+                ld      a,$05           ; DMA Richtung: B-->A
+IDE_HOST_DMA_1: ld      (MDMA_DIR),a
+
+                res     7,e             ; Flag: DMA Continue moeglich = nein
+IDE_HOST_DMA_2: call    IDE_Wait4Data
+                ret     nc
+
+                ld      a,(MIDE_STEUER)
+                and     a,$E0
+                or      a,$30
+                out     (REG_STEUER),a  ; Daten-Register anwaehlen
+                in      a,(REG_RESET)
+
+                ld      hl,(MDMA_MEM_ADR)
+                ld      bc,512
+                add     hl,bc
+                jr      nc,IDE_HOST_DMA_4 ; Ganzer Sektor?
+
+                push    hl
+                ld      a,(MDMA_MEM_ADR)
+                xor     a,$FF
+                ld      (MDMA_BLK_LEN),a
+                ld      a,(MDMA_MEM_ADR+1)
+                xor     a,$FF
+                ld      (MDMA_BLK_LEN+1),a
+
+                ld      hl,MDMA_PARAM    ; Addresse DMA-Paramter
+                ld      bc,MDMA_PAR_COUNT; Anzahl DMA-Parameter und Controller-Port (0)
+                otir
+
+                ld      hl,$C000
+                ld      (MDMA_MEM_ADR),hl
+                ld      a,(KHOSTSEG)
+                inc     a
+                ld      (KHOSTSEG),a
+                out     (REG_HOSTSEL),a
+                pop     hl
+                ld      a,h
+                or      a,l
+                jr      z,IDE_HOST_DMA_3
+                dec     hl
+                ld      (MDMA_BLK_LEN),hl
+                ld      hl,MDMA_PARAM    ; Addresse DMA-Paramter
+                ld      bc,MDMA_PAR_COUNT; Anzahl DMA-Parameter und Controller-Port (0)
+                otir
+
+IDE_HOST_DMA_3: res     7,e              ; Flag: DMA Continue moeglich = nein
+                ld      hl,(MDMA_MEM_ADR)
+                ld      bc,(MDMA_BLK_LEN)
+                add     hl,bc
+                inc     hl
+                ld      (MDMA_MEM_ADR),hl
+                ld      bc,511
+                ld      (MDMA_BLK_LEN),bc
+                jr      IDE_HOST_DMA_7
+
+IDE_HOST_DMA_4: bit     7,e             ; Flag: DMA Continue moeglich ?
+                jr      nz,IDE_HOST_DMA_5
+                ld      hl,MDMA_PARAM    ; Addresse DMA-Paramter
+                ld      bc,MDMA_PAR_COUNT; Anzahl DMA-Parameter und Controller-Port (0)
+                otir
+                jr      IDE_HOST_DMA_6
+
+IDE_HOST_DMA_5: ld      a,$83           ; DMA-Kommando: Stop
+                out     (0),a
+                ld      a,$D3           ; DMA-Kommando: Continue (resettet den Bytecounter)
+                out     (0),a
+                ld      a,$87           ; DMA-Kommando: Start
+                out     (0),a
+
+IDE_HOST_DMA_6: ld      hl,(MDMA_MEM_ADR)
+                ld      bc,512
+                add     hl,bc
+                ld      (MDMA_MEM_ADR),hl
+                set     7,e             ; Flag: DMA Continue moeglich = ja
+IDE_HOST_DMA_7: ld      a,(MSECCOUNT)
+                dec     a
+                ld      (MSECCOUNT),a   ; Sektor-Anzahl runterzaehlen
+                jr      nz,IDE_HOST_DMA_2
+                ld      a,(FUNKTIONSCODE)
+                bit     1,a
+                scf
+                ret     z
+                jp      IDE_Wait_Rdy	; bei Schreiben auf fertig-Meldung warten
+
+
+; ***************************************************************
+IDE_CheckReady: ld      a,(MIDE_DEVICE)
+                ld      b,$16
+                call    IDE_Setreg
+IDE_CheckRdy_2: ld      c,$17
+                call    IDE_Getreg
+                bit     3,a
+                jp      z,IDE_CheckRdy_3
+                ld      hl,$8000
+                ld      c,REG_DATA
+                ld      b,0
+                inir
+                otir
+                jr      IDE_CheckRdy_2
+IDE_CheckRdy_3: bit     6,a
                 ret
 
 
 ; ***************************************************************
 ; Warten bis die Platte die Bereitschaft zur Datenuebertragung meldet
+; Error wenn Carry=0
 IDE_Wait4Data:  ld      a,(MIDE_STEUER)
                 and     a,$E0
                 or      a,$17
@@ -384,20 +514,23 @@ IDE_Wait4Data0: ld      c,b
                 ld      b,0
 IDE_Wait4Data1: in      a,(REG_RESET)
                 in      a,(REG_DATA)
-                bit     3,a
+                bit     0,a
+                jr      z,IDE_Wait4Data3
+                bit     7,a
+                jr      z,IDE_Wait4Data2
+IDE_Wait4Data3: bit     3,a
+                scf
                 ret     nz
                 djnz    IDE_Wait4Data1
                 ld      b,c
-                ld      d,5
                 djnz    IDE_Wait4Data0
-IDE_Wait4Data2: pop     bc
-                ld      bc,$1000
-                call    ErrorLog
-                jr      HDD_Ende
+IDE_Wait4Data2: xor     a,a
+                ret
 
 
 ; ***************************************************************
 ; Warten bis die Platte die Beendigung der Operation meldet
+; Error wenn Carry=0
 IDE_Wait_Rdy:   ld      a,(MIDE_STEUER)
                 and     a,$E0
                 or      a,$17
@@ -408,92 +541,20 @@ IDE_Wait_Rdy_0: ld      c,b
 IDE_Wait_Rdy_1: in      a,(REG_RESET)
                 in      a,(REG_DATA)
                 bit     7,a
+                scf
                 ret     z
                 bit     0,a
                 jr      nz,IDE_Wait_Rdy_2
                 djnz    IDE_Wait_Rdy_1
                 ld      b,c
                 djnz    IDE_Wait_Rdy_0
-IDE_Wait_Rdy_2: pop     bc
-                ld      bc,$1000
-                ld      d,6
-                call    ErrorLog
-                jr      HDD_Ende
-
-
-; ***************************************************************
-; Setze einzelnes IDE-Register (a)-->Register(b) 
-IDE_Setreg:     push    bc
-                ld      c,a
-                ld      a,(MIDE_STEUER)
-                and     a,$E0
-                or      a,b
-                out     (REG_STEUER),a
-                in      a,(REG_RESET)
-                ld      a,c
-                out     (REG_DATA),a
-                ld      a,0
-                out     (REG_DATA),a
-                pop     bc
-                ret
-
-
-; ***************************************************************
-; Holt einzelnes IDE-Register Register(c) --> a
-IDE_Getreg:     ld      a,(MIDE_STEUER)
-                and     a,$E0
-                or      a,c
-                out     (REG_STEUER),a
-                in      a,(REG_RESET)
-                in      a,(REG_DATA)
-                ret
-
-
-; ***************************************************************
-; DMA-Transfer
-IDE_DMA:        ld      a,(MIDE_STEUER)
-                and     a,$E0
-                or      a,$30
-                out     (REG_STEUER),a
-                in      a,(REG_RESET)
-                ld      a,b
-                ld      (MDMA_DIR),a    ; direkt in die DMA-Parameter speichern
-                ld	    c,0             ; DMA-Controller Port
-                ld      hl,MDMA_PARAM   ; Addresse DMA-Paramter
-                ld      b,dma_param_en-dma_param_st    ; Anzahl DMA-Parameter
-                otir
-                ret
-
-
-; ***************************************************************
-; CHS um eins erhoehen
-IncCHS:         ld      a,(SECTOR)
-                inc     a
-                ld      (SECTOR),a
-                ld      b,a
-                ld      a,(MSECTORCT)
-                cp      a,b
-                ret     nz
-                ld      a,0
-                ld      (SECTOR),a
-                ld      a,(HEAD)
-                inc     a
-                ld      (HEAD),a
-                ld      b,a
-                ld      a,(MHEADCT)
-                cp      a,b
-                ret     nz
-                ld      a,0
-                ld      (HEAD),a
-                ld      hl,(CYLINDER)
-                inc     hl
-                ld      (CYLINDER),hl
+IDE_Wait_Rdy_2: xor     a,a
                 ret
 
 
 ; ***************************************************************
 ; Setze CHS in die IDE-Register
-SetCHS:         ld      a,(HEAD)
+IDE_SetCHS:     ld      a,(HEAD)
                 and     a,$0f
                 or      a,$a0
                 ld      c,a
@@ -510,95 +571,90 @@ SetCHS:         ld      a,(HEAD)
                 call    IDE_Setreg
                 ld      b,$15
                 ld      a,(CYLINDER+1)
+                call    IDE_Setreg
+                ld      a,(MSECCOUNT)
+                ld      b,$12
                 jr      IDE_Setreg
 
 
 ; ***************************************************************
-; Z80-DMA Parameter
-dma_param_st:   db      $C3             ; Reset
-                db      $79             ; Transfer B-->A
-dma_mem:        dw      $2100           ; Port A Addresse
-                dw      $200            ; Block Laenge
-                db      $54             ; Port A Memory, Increasing
-                db      $4E             ; Port A: 2 Cycle, voll IORQ, voll MREQ, voll RD, halb WR
-                db      $68             ; Port B IO, Fixed
-                db      $4E             ; Port B: 2 Cycle, voll IORQ, voll MREQ, voll RD, halb WR
-                db      $80             ; no INT, no STOP
-                db      $BD             ; Conti Mode
-                db      REG_DATA        ; Port Low
-                db      $00             ; Port High
-                db      $12             ; Interrupt am Ende
-                db      $10             ; Interropt Vektor
-                db      $82             ; READY active High
-                db      $CF             ; Load Command
-dma_dir:        db      $01             ; Transfer direction
-                db      $CF             ; Load
-                db      $87             ; Start DMA
-dma_param_en:   db      0
+; Setze einzelnes IDE-Register (a)-->Register(b) 
+IDE_Setreg:     ex      af,af'
+                ld      a,(MIDE_STEUER)
+                and     a,$E0
+                or      a,b
+                out     (REG_STEUER),a
+                in      a,(REG_RESET)
+                ex      af,af'
+                out     (REG_DATA),a
+                ld      a,0
+                out     (REG_DATA),a
+                ret
 
 
 ; ***************************************************************
-; Error Logging
-ErrorLog:       push    bc
-                ld      bc,(MERRORPTR)
-                ld      hl,MERRORENDE
-                scf
-                sbc     hl,bc
-                jr      c,ErrorLog_1
-                ld      bc,(MERRORPTR)
-                ld      hl,MERRORSTART
-                sbc     hl,bc
-                jr      c,ErrorLog_2
-ErrorLog_1:     ld      hl,MERRORSTART
-                ld      (MERRORPTR),hl
-ErrorLog_2:     ld      hl,(MERRORPTR)
-                pop     bc
-                ld      (hl),d
-                inc     hl
-                ld      (hl),a
-                inc     hl
-                ld      (hl),c
-                inc     hl
-                ld      (hl),b
-                inc     hl
-                ld      a,(FUNKTIONSCODE)
-                ld      (hl),a
-                inc     hl
-                ld      a,(LAUFWERKNR)
-                ld      (hl),a
-                inc     hl
-                ld      a,(CYLINDER)
-                ld      (hl),a
-                inc     hl
-                ld      a,(CYLINDER+1)
-                ld      (hl),a
-                inc     hl
-                ld      a,(HEAD)
-                ld      (hl),a
-                inc     hl
-                ld      a,(SECTOR)
-                ld      (hl),a
-                inc     hl
-                ld      a,(MHEADCT)
-                ld      (hl),a
-                inc     hl
-                ld      a,(MSECTORCT)
-                ld      (hl),a
-                inc     hl
-                ld      a,(MCYLINDERCT)
-                ld      (hl),a
-                inc     hl
-                ld      a,(MCYLINDERCT+1)
-                ld      (hl),a
-                inc     hl
-                ld      a,0
-                ld      (hl),a
-                inc     hl
-                ld      a,0
-                ld      (hl),a
-                inc     hl
-                ld      (MERRORPTR),hl
+; Holt einzelnes IDE-Register Register(c) --> a
+IDE_Getreg:     ld      a,(MIDE_STEUER)
+                and     a,$E0
+                or      a,c
+                out     (REG_STEUER),a
+                in      a,(REG_RESET)
+                in      a,(REG_DATA)
                 ret
+
+
+; ***************************************************************
+; CHS um die Anzahl der Sektoren erhoehen
+IDE_AddCHS:     ld      a,(SECTOR)
+                ld      b,a
+                ld      a,(MSECTORCT)
+                ld      c,a
+                ld      a,(BYTECOUNT+1)
+                sra     a
+                add     a,b
+                ld      (SECTOR),a
+                sub     a,c
+                jr      z,IDE_AddCHS_1
+                ret     c
+IDE_AddCHS_1:   ld      (SECTOR),a
+                ld      a,(HEAD)
+                inc     a
+                ld      (HEAD),a
+                ld      b,a
+                ld      a,(MHEADCT)
+                cp      a,b
+                ret     nz
+                ld      a,0
+                ld      (HEAD),a
+                ld      hl,(CYLINDER)
+                inc     hl
+                ld      (CYLINDER),hl
+                ret
+
+
+; ***************************************************************
+; Z80-DMA Parameter
+
+dma_param_st:   db      $C3             ; 0 Reset
+                db      $79             ; 1 Transfer B-->A
+                dw      $2100           ; 2 (MDMA_MEM_ADR) Port A Addresse
+                dw      $1ff            ; 4 (MDMA_BLK_LEN) Block Laenge
+                db      $54             ; 6 Port A Memory, Increasing
+                db      $01             ; 7 (MDMA_MEM_FLAG) Port A: 3 Cycle, halb IORQ, halb MREQ, halb RD, halb WR
+                db      $68             ; 8 Port B IO, Fixed
+                db      $4E             ; 9 Port B: 2 Cycle, voll IORQ, voll MREQ, voll RD, halb WR
+                db      $80             ; 10 no INT, no STOP
+                db      $BD             ; 11 Conti Mode
+                db      REG_DATA        ; 12 Port Low
+                db      $00             ; 13 Port High
+                db      $12             ; 14 Interrupt am Ende
+                db      $10             ; 15 Interropt Vektor
+                db      $92             ; 16 (MDMA_MUX_FLAG) READY active High, multiplexed
+                db      $CF             ; 17 Load Command
+                db      $01             ; 18 (MDMA_DIR) Transfer direction
+                db      $CF             ; 19 Load
+                db      $87             ; 20 Start DMA
+dma_param_en:
 
 ; ***************************************************************
 
