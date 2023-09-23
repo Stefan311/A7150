@@ -1,0 +1,138 @@
+; Copyright (c) 2022, Stefan Berndt
+;
+; All rights reserved.
+;
+; Redistribution and use in source and binary forms, with or without 
+; modification, are permitted provided that the following conditions are met:
+; 1. Redistributions of source code must retain the above copyright notice, 
+;    this list of conditions and the following disclaimer.
+; 2. Redistributions in binary form must reproduce the above copyright notice, 
+;    this list of conditions and the following disclaimer in the documentation 
+;    and/or other materials provided with the distribution.
+;
+; THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" 
+; AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE 
+; IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE 
+; ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE 
+; LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR 
+; CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF 
+; SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS 
+; INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN 
+; CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) 
+; ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF 
+; THE POSSIBILITY OF SUCH DAMAGE.
+
+; IO-Register
+REG_DATA        equ     $B0             ; IO-Port IDE-Daten (Lesen und Schreiben)
+REG_STEUER      equ     $B1             ; IO-Port Steuerregister (Schreiben)
+REG_SWITCH      equ     $B1             ; IO-Port Steuerregister (Lesen)
+REG_RESET       equ     $B2             ; IO-Port 16Bit-Toggler Reset (Lesen)
+
+                org 	$2100
+
+                ld      a,0
+                ld      ($21fe),a
+                ld      ($21ff),a
+
+; auf Master stellen
+                ld      a,$00
+                ld      b,$16
+                call    IDE_Setreg
+
+; Statusregister lesen
+                ld      c,$17
+                call    IDE_Getreg
+                and     a,$FE
+                cp      a,$50
+                jr      nz,NoMaster ; Nicht bereit
+
+; Device-Info lesen
+                ld      a,$EC
+                ld      b,$17
+                call    IDE_Setreg
+                call    IDE_Wait4Data
+                jr      nc,NoMaster ; Keine Daten oder Error
+                ld      hl,$2200
+                call    IDE_Read
+                ld      a,1
+                ld      ($21fe),a
+                
+; auf Slave stellen
+NoMaster:       ld      a,$10
+                ld      b,$16
+                call    IDE_Setreg
+
+; Statusregister lesen
+                ld      c,$17
+                call    IDE_Getreg
+                and     a,$FE
+                cp      a,$50
+                ret     nz          ; Nicht bereit
+
+; Device-Info lesen
+                ld      a,$EC
+                ld      b,$17
+                call    IDE_Setreg
+                call    IDE_Wait4Data
+                ret     nc          ; Keine Daten oder Error
+                ld      hl,$2400
+                call    IDE_Read
+                ld      a,1
+                ld      ($21ff),a
+                ret
+        
+; ***************************************************************
+; Warten bis die Platte die Bereitschaft zur Datenuebertragung meldet
+; Error wenn Carry=0
+IDE_Wait4Data:  ld      a,$37
+                out     (REG_STEUER),a
+                ld      b,0
+IDE_Wait4Data1: in      a,(REG_RESET)
+                in      a,(REG_DATA)
+                bit     0,a
+                jr      z,IDE_Wait4Data3
+                bit     7,a
+                jr      z,IDE_Wait4Data2
+IDE_Wait4Data3: bit     3,a
+                scf
+                ret     nz
+                djnz    IDE_Wait4Data1
+IDE_Wait4Data2: scf
+                ccf
+                ret
+        
+; ***************************************************************
+; Setze einzelnes IDE-Register (a)-->Register(b) 
+IDE_Setreg:     push    bc
+                ld      c,a
+                ld      a,$30
+                or      a,b
+                out     (REG_STEUER),a
+                in      a,(REG_RESET)
+                ld      a,c
+                out     (REG_DATA),a
+                ld      a,0
+                out     (REG_DATA),a
+                pop     bc
+                ret
+
+
+; ***************************************************************
+; Holt einzelnes IDE-Register Register(c) --> a
+IDE_Getreg:     ld      a,$30
+                or      a,c
+                out     (REG_STEUER),a
+                in      a,(REG_RESET)
+                in      a,(REG_DATA)
+                ret
+
+; ***************************************************************
+; Holt 512 Bytes von IDE nach (HL)
+IDE_Read:       ld      a,$30
+                out     (REG_STEUER),a
+                ld      c,REG_DATA
+                ld      b,0
+                in      a,(REG_RESET)
+                inir
+                inir
+                ret

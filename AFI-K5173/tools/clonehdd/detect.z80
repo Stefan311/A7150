@@ -52,16 +52,28 @@ MFM_ON          equ     $22dc           ; MFM-Platte online?
 MFM_CYL         equ     $22de           ; Zylinder MFM-Platte
 MFM_HDS         equ     $22e0           ; Koepfe MFM-Platte
 
+CH2VECT         equ     $22e1           ; alter Kanal B-Handler
+
+
+; ***************************************************************
+; IO-Register
+REG_DATA        equ     $B0             ; IO-Port IDE-Daten (Lesen und Schreiben)
+REG_STEUER      equ     $B1             ; IO-Port Steuerregister (Schreiben)
+REG_SWITCH      equ     $B1             ; IO-Port Steuerregister (Lesen)
+REG_RESET       equ     $B2             ; IO-Port 16Bit-Toggler Reset (Lesen)
+
+
 ; ***************************************************************
 ; Speicher fuer AFI
 MIDE_DEVICE     equ     $3a08           ; 0=Primary(Master)  $10=Secondary(Slave)
 
                 org     $2100
 
-Detect:         ld      hl,($3b6b)
+Detect:         ld      hl,($3b7d)
+                ld      (CH2VECT),hl
+                ld      hl,($3b6b)
                 ld      bc,$1000
-                scf
-                ccf
+                xor     a,a
                 sbc     hl,bc
                 jr      z,Detect_1
 
@@ -143,12 +155,21 @@ Detect_5:       inc     ix
 ; Test IDE Devices
 Detect_3:       ld      a,(MIDE_DEVICE)
                 ld      (IDE_DEV),a
+                ld      a,$00
+                ld      b,$16
+                call    IDE_Setreg
+                ld      c,$17
+                call    IDE_Getreg
+                and     a,$FE
+                cp      a,$50
+                ld      a,0
+                jr      nz,Detect_6
                 ld      hl,(JPIDE)
+                ld      a,0
+                ld      (MIDE_DEVICE),a
                 ld      bc,10           ; Cylinder
                 ld      a,2             ; Koepfe
                 call    Init_Disk
-                ld      a,0
-                ld      (MIDE_DEVICE),a
                 ld      hl,(JPIDE)
                 call    Read_MBR
                 ld      a,0
@@ -160,7 +181,20 @@ Detect_3:       ld      a,(MIDE_DEVICE)
                 ld      a,1
 Detect_6:       ld      (PIDE_ON),a
                 ld      a,$10
+                ld      b,$16
+                call    IDE_Setreg
+                ld      c,$17
+                call    IDE_Getreg
+                and     a,$FE
+                cp      a,$50
+                ld      a,0
+                jr      nz,Detect_7
+                ld      a,$10
                 ld      (MIDE_DEVICE),a
+                ld      hl,(JPIDE)
+                ld      bc,10           ; Cylinder
+                ld      a,2             ; Koepfe
+                call    Init_Disk
                 ld      hl,(JPIDE)
                 call    Read_MBR
                 ld      a,0
@@ -210,4 +244,29 @@ Read_MBR_1:     ld      (de),a
                 ld      a,$23
                 ld      (BUFFER+1),a
                 jp      (hl)
+
+; ***************************************************************
+; Setze einzelnes IDE-Register (a)-->Register(b) 
+IDE_Setreg:     push    bc
+                ld      c,a
+                ld      a,$30
+                or      a,b
+                out     (REG_STEUER),a
+                in      a,(REG_RESET)
+                ld      a,c
+                out     (REG_DATA),a
+                ld      a,0
+                out     (REG_DATA),a
+                pop     bc
+                ret
+
+
+; ***************************************************************
+; Holt einzelnes IDE-Register Register(c) --> a
+IDE_Getreg:     ld      a,$30
+                or      a,c
+                out     (REG_STEUER),a
+                in      a,(REG_RESET)
+                in      a,(REG_DATA)
+                ret
 

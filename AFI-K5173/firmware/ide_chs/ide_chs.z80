@@ -31,14 +31,17 @@
 ;    ist der CHS-Modus etwas schneller als der LBA-Modus.
 ; 3. Es sind nur CHS-Parameter Kombinationen erlaubt, die durch die IDE-Interne
 ;    CHS-Translation erlaubt sind. Welche das sind, haengt von den eingesetzten
-;    Festplatten ab. Die Platten, die ich bisher getestet habe, fressen ALLES.
+;    Festplatten ab. Die meisten Platten, die ich bisher getestet habe, fressen ALLES.
+;    Eine will mindestens 8 Koepfe haben.
 ; 4. Durch die CHS-Translation sind damit Beschriebene Platten relativ gut PC-Kompatibel
 ; 5. Platten, die mit Version 0.1 beschrieben worden sind, sind ab 0.2 nicht mehr lesbar.
+; 6. Der LBA-Modus wird nur verwendet, wenn die gewuenschte CHS-Translation
+;    von der Festplatte nicht angenommen wird.
 ;
-; Version: 0.4
+; Version: 0.5
 ; Features:
 ; - Schalterstellungen: 0=MFM, 1=Primary IDE, 2=Secundary IDE
-; - IDE-Adressmodus: CHS
+; - IDE-Adressmodus: CHS oder LBA28
 ; - Datentransfer mit Z80-DMA direkt in den Hostspeicher (~380KB/s)
 ; - Unterstuetzung des Kanal B fuer den USB-Kontroller
 ;
@@ -53,10 +56,18 @@
 ; Mehrere IDE-Sektoren am Stueck verarbeiten
 ; DMA-Transfers direkt in den Hostspeicher
 ; Debug-Log entfernt
+; V0.5
+; Unterstuetzung fuer LBA Addressmodus aus IDE(LBA) V0.4 importiert
+; Automatische Auswahl, ob CHS oder LBA verwendet wird
+; Das LED-Leuchten ist etwas verlaengert, damit die LED's etwas besser erkennbar sind
+; Bugfix: Stiller CHS-Translation Fail, wenn Platte die Translation nicht annimmt
+; Bugfix: Fehlernder Sektor-Inhalt bei DMA-Transfers, wenn die Sektorgrenze genau an der Segmentgrenze liegt
 
 ; ***************************************************************
 ; Schalter fuer Features:
 CHAN2Interface  equ     1               ; 0 = deaktivieren, 1 = aktivieren
+ForceCHS        equ     0               ; 1 = CHS erzwingen
+ForceLBA        equ     0               ; 1 = LBA erzwingen
 
 ; ***************************************************************
 ; Parameter von und zur KES
@@ -73,12 +84,18 @@ KHOSTSEG        equ     $3b2e+20        ; Buffer im HOST-Speicher, schon in KES-
 ALLBYTECOUNT    equ     $3b2e+22        ; Gesamtanzahl bytes
 
 ; Speicher fuer AFI
+MLBA1           equ     $3a00           ; 48bit=6byte
 MSECCOUNT       equ     $3a06
 MIDE_STEUER     equ     $3a07           ; 8bit: Kopie des Steuer-Registers, $80=LED2, $40=LED1, $20=Reset, $10=SEL1, $08=Sel0, $04=A2, $02=A1, $01=A0
 MIDE_DEVICE     equ     $3a08           ; 8bit: 0=Primary(Master)  $10=Secondary(Slave)
+MLBA2           equ     $3a09           ; 48bit=6byte
 MHEADCT         equ     $3a10           ; Anzahl Koepfe
 MSECTORCT       equ     $3a11           ; Anzahl Sektoren pro Spur
 MCYLINDERCT     equ     $3a12           ; Anzahl Zylinder
+MACCMODE        equ     $3a14           ; $00=CHS $01=LBA
+MLEDRTIMER      equ     $3a15           ; Leuchtzeit der Lese-LED verlaengern
+MLEDWTIMER      equ     $3a16           ; Leuchtzeit der Schreib-LED verlaengern
+
 
 MDMA_PARAM      equ     $3a40           ; 21 bytes, Kopie von dma_param_st
 MDMA_MEM_ADR    equ     MDMA_PARAM+2
@@ -143,8 +160,28 @@ Reset_2:        ret
 
 
 ; ***************************************************************
-; Wird zyklisch aufgerufen
-Cyclic:         xor     a
+; Wird zyklisch aufgerufen, realisiert "nachleuchten" der LED's
+Cyclic:         ld      hl,MLEDRTIMER
+                xor     a,a
+                or      a,(hl)
+                jr      z,Cyclic_1
+                dec     (hl)
+                jr      nz,Cyclic_1
+                ld      a,(MIDE_STEUER)
+                and     a,$bf
+                out     (REG_STEUER),a
+                ld      (MIDE_STEUER),a
+Cyclic_1:       inc     hl                
+                xor     a,a
+                or      a,(hl)
+                ret     z
+                dec     (hl)
+                jr      nz,Cyclic_2
+                ld      a,(MIDE_STEUER)
+                and     a,$7f
+                out     (REG_STEUER),a
+                ld      (MIDE_STEUER),a
+Cyclic_2:       xor     a
                 ret
 
 
@@ -182,11 +219,7 @@ HDDService_0:   ld      a,(FUNKTIONSCODE)
 
 ; ***************************************************************
 ; Errorcode (bc) schreiben und Ende
-Service_Ende:   ld      a,(MIDE_STEUER)
-                and     a,$3f           ; LEDs aus
-                ld      (MIDE_STEUER),a
-                out     (REG_STEUER),a
-                ld      (ERRORREG),bc
+Service_Ende:   ld      (ERRORREG),bc
                 ld      a,0
                 ld      (ERRORREG+2),a
                 ld      hl,(CYLINDER)
@@ -226,7 +259,7 @@ HDD_Init_1:     ld      b,$16
                 call    IDE_Setreg
                 ld      c,$17           ; IDE-Statusregister
                 call    IDE_Getreg
-                and     a,$e1
+                and     a,$e0
                 cp      a,$40           ; Status: Disk bereit
                 jp      z,HDD_Init_2
                 dec     l
@@ -237,30 +270,38 @@ HDD_Init_1:     ld      b,$16
                 jr      nz,HDD_Init_1   ; bis zu 40 Sekunden warten. 
                 jr      IDE_NotReady
 
-HDD_Init_2:     ld      ix,(BUFFER)
+HDD_Init_2:
+
+    if ForceLBA=0
+                ld      ix,(BUFFER)
                 ld      a,(ix+2)        ; Heads
                 dec     a
                 and     a,$0f
                 ld      b,a
                 ld      a,(MIDE_DEVICE)
-                or      a,$e0
+                or      a,$a0
                 or      a,b
                 ld      b,$16
                 call    IDE_Setreg      ; ins DEV/Head-Register
                 ld      a,(ix+4)        ; Sektoren/Spur
                 ld      b,$12
-                call    IDE_Setreg
-                ld      a,$91
-                ld      b,$17
                 call    IDE_Setreg      ; ins Sektorcount-Register
+                ld      a,$91           ; Kommando: Initialize Device Parameters
+                ld      b,$17
+                call    IDE_Setreg      ; ins Kommando-Register
                 call    IDE_Wait_Rdy
+                
+                ld      c,$17           ; IDE-Statusregister
+                call    IDE_Getreg
+                and     a,$01           ; Fehlerstatus: CHS-Translation angenommen?
+                ld      (MACCMODE),a
+    endif
+    
+    if ForceCHS=1
+                jr      nz,IDE_NotReady ; Wenn kein LBA verwendet werden darf, dann Fehler weitermelden
+    endif
 
-                ld      hl,(BUFFER)
-                ld      bc,16
-                ld      de,$3ee0
-                ldir
-
-                jp      IDE_OKEnde
+                jr      IDE_OKEnde
 
 ; ***************************************************************
 ; Sektor-ID lesen (Fake-Funktion)
@@ -268,7 +309,7 @@ HDD_SektorId:   ld      de,(BUFFER)
                 ld      hl,HDD_FakeID
                 ld      bc,5
                 ldir
-                jp      IDE_OKEnde
+                jr      IDE_OKEnde
 
 HDD_FakeID:     dw      0               ; Zylinder
                 db      0               ; Head
@@ -288,23 +329,45 @@ IDE_Transfer:   ld      e,a
                 bit     0,e
                 jr      z,IDE_Trans_1
                 ld      a,(BYTECOUNT+1) ; High-Byte Bytecounter (Einzelauftrag)
-IDE_Trans_1:    srl     a               ; /2, damit haben wir den 512-Byte-Block-Counter
+IDE_Trans_1:    srl     a               ; *2, damit haben wir den 512-Byte-Block-Counter
                 jr      z,IDE_NotFound
-
-                ld      (MSECCOUNT),a 
-                jr      IDE_Trans_2
+                ld      (MSECCOUNT),a
 
 IDE_Trans_2:    call    IDE_CheckReady
                 jr      z,IDE_NotReady
-                ld      a,(MIDE_STEUER)
+                ld      a,5
                 bit     1,e             ; Lesefunktion?
                 jr      nz,IDE_Trans_3
-                or      a,$40           ; LED 1 an
+                ld      b,$40           ; LED 1 an
+                ld      (MLEDRTIMER),a
 IDE_Trans_3:    bit     1,e             ; Schreibfunktion?
                 jr      z,IDE_Trans_4
-                or      a,$80           ; LED 2 an
-IDE_Trans_4:    ld      (MIDE_STEUER),a
+                ld      b,$80           ; LED 2 an
+                ld      (MLEDWTIMER),a
+IDE_Trans_4:    ld      a,(MIDE_STEUER)
+                or      a,b
+                ld      (MIDE_STEUER),a
+                
+    if ForceLBA=1                       ; nur LBA
+                call    CHS2LBA
+                call    IDE_SetLBA28
+    endif
+
+    if ForceCHS=1                       ; nur CHS
                 call    IDE_SetCHS
+    endif
+
+    if (ForceLBA=0) & (ForceCHS=0)      ; Automatische Auswahl ob CHS oder LBA
+                ld      a,(MACCMODE)
+                bit     0,a
+                jr      z,IDE_Trans_5
+                call    CHS2LBA
+                call    IDE_SetLBA28
+                jr      IDE_Trans_6
+IDE_Trans_5:    call    IDE_SetCHS
+IDE_Trans_6:
+    endif
+    
                 ld      a,$20           ; IDE-Kommando: Sektor lesen (CHS/LBA28)
                 bit     1,e
                 jr      z,IDE_Trans_8
@@ -324,12 +387,8 @@ IDE_Trans_10:   call    IDE_HOST_DMA
                 ld      bc,0            ; Errorcode: Kein Fehler
                 jr      c,IDE_Trans_11
                 ld      bc,$1000        ; Errorcode: Sektor nicht gefunden
-IDE_Trans_11:   ld      a,(MIDE_STEUER)
-                and     a,$3f           ; LEDs aus
-                ld      (MIDE_STEUER),a
-                out     (REG_STEUER),a
-                ld      (ERRORREG),bc
-                ld      a,0
+IDE_Trans_11:   ld      (ERRORREG),bc
+                xor     a
                 ld      (ERRORREG+2),a
                 ld      a,(MSECCOUNT)
                 sla     a
@@ -361,12 +420,16 @@ IDE_KES_DMA_1:  ld      (MDMA_DIR),a
                 ld      hl,MDMA_PARAM   ; Addresse DMA-Paramter
                 ld      bc,MDMA_PAR_COUNT; Anzahl DMA-Parameter und Controller-Port (0)
                 otir
+                ld      a,$01           ; Port A: 3 Cycle, halb IORQ, halb MREQ, halb RD, halb WR
+                ld      (MDMA_MEM_FLAG),a
+                ld      a,$92           ; READY active High, multiplexed
+                ld      (MDMA_MUX_FLAG),a
 IDE_KES_DMA_2:  ld      a,(MSECCOUNT)
                 dec     a
                 ld      (MSECCOUNT),a   ; Sektor-Anzahl runterzaehlen
                 jr      z,IDE_KES_DMA_3
                 call    IDE_Wait4Data
-                jr      nc,IDE_KES_DMA_4
+                ret     nc
                 ld      a,(MIDE_STEUER)
                 and     a,$E0
                 or      a,$30
@@ -381,10 +444,6 @@ IDE_KES_DMA_2:  ld      a,(MSECCOUNT)
                 jr      IDE_KES_DMA_2
 IDE_KES_DMA_3:  bit     1,e
                 scf
-IDE_KES_DMA_4:  ld      a,$01           ; Port A: 3 Cycle, halb IORQ, halb MREQ, halb RD, halb WR
-                ld      (MDMA_MEM_FLAG),a
-                ld      a,$92           ; READY active High, multiplexed
-                ld      (MDMA_MUX_FLAG),a
                 ret     z
                 jp      IDE_Wait_Rdy	; bei Schreiben auf fertig-Meldung warten
 
@@ -444,12 +503,13 @@ IDE_HOST_DMA_2: call    IDE_Wait4Data
                 ld      bc,MDMA_PAR_COUNT; Anzahl DMA-Parameter und Controller-Port (0)
                 otir
 
-IDE_HOST_DMA_3: res     7,e              ; Flag: DMA Continue moeglich = nein
                 ld      hl,(MDMA_MEM_ADR)
                 ld      bc,(MDMA_BLK_LEN)
                 add     hl,bc
                 inc     hl
                 ld      (MDMA_MEM_ADR),hl
+
+IDE_HOST_DMA_3: res     7,e              ; Flag: DMA Continue moeglich = nein
                 ld      bc,511
                 ld      (MDMA_BLK_LEN),bc
                 jr      IDE_HOST_DMA_7
@@ -492,6 +552,9 @@ IDE_CheckRdy_2: ld      c,$17
                 call    IDE_Getreg
                 bit     3,a
                 jp      z,IDE_CheckRdy_3
+                ld      a,(MIDE_STEUER)
+                and     a,$E0
+                out     (REG_STEUER),a
                 ld      hl,$8000
                 ld      c,REG_DATA
                 ld      b,0
@@ -552,6 +615,7 @@ IDE_Wait_Rdy_2: xor     a,a
                 ret
 
 
+    if ForceLBA=0
 ; ***************************************************************
 ; Setze CHS in die IDE-Register
 IDE_SetCHS:     ld      a,(HEAD)
@@ -575,6 +639,7 @@ IDE_SetCHS:     ld      a,(HEAD)
                 ld      a,(MSECCOUNT)
                 ld      b,$12
                 jr      IDE_Setreg
+    endif
 
 
 ; ***************************************************************
@@ -632,6 +697,112 @@ IDE_AddCHS_1:   ld      (SECTOR),a
                 ret
 
 
+    if ForceCHS=0
+; ***************************************************************
+; Setze LBA(28bit) in die IDE-Register
+IDE_SetLBA28:   ld      a,(MLBA1+3)
+                and     a,$0f
+                or      a,$e0
+                ld      c,a
+                ld      a,(MIDE_DEVICE)
+                or      a,c
+                ld      b,$16
+                call    IDE_Setreg
+                ld      b,$13
+                ld      a,(MLBA1)
+                call    IDE_Setreg
+                ld      b,$14
+                ld      a,(MLBA1+1)
+                call    IDE_Setreg
+                ld      b,$15
+                ld      a,(MLBA1+2)
+                call    IDE_Setreg
+                ld      a,(MSECCOUNT)
+                ld      b,$12
+                jr      IDE_Setreg
+
+
+; ***************************************************************
+; CHS in LBA umrechnen: LBA1=(CYLINDER*HEADCT+HEAD)*SECTORCT+SECTOR
+CHS2LBA:        exx
+                ld      a,(MHEADCT)      ; Cylinder * HEADCT
+                ld      de,(CYLINDER)
+                ld      b,8
+                ld      c,0
+                ld      hl,0
+Mul_16bX8b_0:   sla     l
+                rl      h
+                rl      c
+                sla     a
+                jr      nc,Mul_16bX8b_1
+                add     hl,de
+                jr      nc,Mul_16bX8b_1
+                inc     c
+Mul_16bX8b_1:   djnz    Mul_16bX8b_0
+
+                ld      a,(HEAD)            ; + HEAD
+                ld      e,a
+                ld      d,0
+                add     hl,de
+                jr      nc,Add_32b_0
+                inc     bc
+Add_32b_0:      ld      (MLBA2),hl
+                ld      (MLBA2+2),bc
+
+                ld      a,(MSECTORCT)        ; * SECTORCT
+                ld      b,8
+                ld      hl,0
+                ld      (MLBA1),hl
+                ld      (MLBA1+2),hl
+                ld      (MLBA1+4),hl
+                ld      (MLBA2+4),hl
+
+Mul_48bX8b_0:   ld      c,b
+                ld      hl,MLBA1
+                ld      b,6
+                scf
+                ccf
+Mul_48bX8b_2:   rl      (hl)
+                inc     hl
+                djnz    Mul_48bX8b_2
+
+                sla     a
+                jr      nc,Mul_48bX8b_1
+
+                ld      de,(MLBA2)
+                ld      hl,(MLBA1)
+                add     hl,de
+                ld      (MLBA1),hl
+                ld      de,(MLBA2+2)
+                ld      hl,(MLBA1+2)
+                adc     hl,de
+                ld      (MLBA1+2),hl
+                ld      de,(MLBA2+4)
+                ld      hl,(MLBA1+4)
+                adc     hl,de
+                ld      (MLBA1+4),hl
+
+Mul_48bX8b_1:   ld      b,c
+                djnz    Mul_48bX8b_0
+
+                ld      a,(SECTOR)          ; + SECTOR
+                ld      c,a
+                ld      b,0
+                ld      hl,(MLBA1)
+                add     hl,bc
+                ld      (MLBA1),hl
+                jr      nc,Add_48b_0
+                ld      hl,(MLBA1+2)
+                inc     hl
+                ld      (MLBA1+2),hl
+                jr      nc,Add_48b_0
+                ld      hl,(MLBA1+4)
+                inc     hl
+                ld      (MLBA1+4),hl         ; = LBA
+Add_48b_0:      exx
+                ret
+    endif
+
 ; ***************************************************************
 ; Z80-DMA Parameter
 
@@ -648,7 +819,7 @@ dma_param_st:   db      $C3             ; 0 Reset
                 db      REG_DATA        ; 12 Port Low
                 db      $00             ; 13 Port High
                 db      $12             ; 14 Interrupt am Ende
-                db      $10             ; 15 Interropt Vektor
+                db      $10             ; 15 Interrupt Vektor
                 db      $92             ; 16 (MDMA_MUX_FLAG) READY active High, multiplexed
                 db      $CF             ; 17 Load Command
                 db      $01             ; 18 (MDMA_DIR) Transfer direction

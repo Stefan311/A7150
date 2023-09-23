@@ -26,19 +26,11 @@
 ; ***************************************************************
 ; Parameter von und zur KES
 FUNKTIONSCODE   equ     $3b2e+11
-LAUFWERKNR      equ     $3b2e+10
 CYLINDER        equ     $3b2e+14
 HEAD            equ     $3b2e+16
 SECTOR          equ     $3b2e+17        ; werden bei KES-Festplatte von 0 gezaehlt!
 BYTECOUNT       equ     $3b2e+4
 BUFFER          equ     $3b2e+6
-ERRORREG        equ     $3b22
-
-; ***************************************************************
-; Parameter vom und zum Hostsystem (Kanal A)
-JPIDE           equ     $22e0           ; Sprungvektor zur IDE-Firmware
-CYLINDERS       equ     $22e2           ; Anzahl Zylinder fuer Source und Target
-HEADS           equ     $22e4           ; Anzahl Koepfe fuer Source und Target
 
 ; ***************************************************************
 ; Parameter vom und zum Hostsystem (Kanal B)
@@ -48,6 +40,7 @@ BPRISEC         equ     $c4a9           ; PRIM/SEC IDE
 BCYL            equ     $c4aa           ; Cylinder
 BHEAD           equ     $c4ac           ; Head
 BSECT           equ     $c4ad           ; Sector
+BBYTES          equ     $c4ae           ; Anzahl Bytes (high)
 BERR            equ     $c4a6           ; Fehler-Flag
 
 ; ***************************************************************
@@ -55,32 +48,6 @@ BERR            equ     $c4a6           ; Fehler-Flag
 MIDE_DEVICE     equ     $3a08           ; 0=Primary(Master)  $10=Secondary(Slave)
 
                 org     $2100
-
-; ***************************************************************
-; Platte initialisieren
-Init_Disk:      ld      bc,(CYLINDERS)
-                ld      ($2300),bc
-                ld      a,(HEADS)
-                ld      ($2302),a
-                ld      a,0
-                ld      ($2303),a
-                ld      ($2307),a
-                ld      a,17
-                ld      ($2304),a
-                ld      bc,512
-                ld      ($2305),bc
-                ld      a,0
-                ld      (FUNKTIONSCODE),a
-                ld      (LAUFWERKNR),a
-                ld      a,8
-                ld      (BYTECOUNT),a
-                ld      bc,$2300
-                ld      (BUFFER),bc
-                call    $1000
-                ld      hl,ChanB_Inst
-                push    hl
-                ld      hl,(JPIDE)
-                jp      (hl)
 
 ; ***************************************************************
 ; Kanal-B Handler installieren
@@ -102,7 +69,7 @@ ChanB_1:        ld      (de),a
                 djnz    ChanB_1
                 ld      a,(BCMD)
                 ld      (FUNKTIONSCODE),a
-                ld      a,2
+                ld      a,(BBYTES)
                 ld      (BYTECOUNT+1),a
                 ld      a,$21
                 ld      (BUFFER+1),a

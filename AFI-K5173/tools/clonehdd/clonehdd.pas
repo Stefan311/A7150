@@ -51,11 +51,15 @@ var
     cylinders: word;
     heads: byte;
 
+	oldchb: word;
+	
     cyl: word;
     hd: byte;
     sect: byte;
     readerr: word;
     writeerr: word;
+
+    error: byte;
 
 function inttostr(i: word):string;
 var o: string;
@@ -65,19 +69,22 @@ begin
 end;  
 
 const DiskNames: array[1..3] of string = ('MFM','1. IDE','2. IDE');
-{$I detect.inc}
-{$I sector.inc}
+{$I detect.inc}    { Detect }
+{$I sector.inc}    { Sector }
+{$I inithdd.inc}   { InitHDD }
+{$I rest_chb.inc}  { ResetChB }
+{$I ideinfo.inc}   { IdeInfo }
 
 begin
   Kes_Init;
   Kes_Buffer_Clear;
-
   { Festplatten erkennen, und Parameter aus dem MBR lesen }
   Kes_Load_Exec_Const(Detect);
   Kes_Buffer_Transfer(true, sizeof(Detect));
   Kes_Exec;
   Kes_Buffer_Transfer(false, 512);
   mfmaktiv:=(Kes_Data[$1d0]=1);
+  oldchb:=Kes_Data[$1e1] or (Kes_Data[$1e2] shl 8);
   pideaktiv:=(not mfmaktiv) and (Kes_Data[$1d1]=0);
   sideaktiv:=(not mfmaktiv) and (Kes_Data[$1d1]=$10);
   jpide:=Kes_Data[$1d2] or (Kes_Data[$1d3] shl 8);
@@ -190,15 +197,57 @@ begin
       exit;
     end;
 
-  { Festplatten-Parameter auf beide Platten setzen, Kanal-B-Handler installieren }
+  { Festplatten-Parameter IDE setzen }
   Kes_Buffer_Clear;
-  Kes_Load_Exec_Const(sector);
+  Kes_Load_Exec_Const(InitHDD);
   Kes_Data[$1e0]:=jpide and 255;
   Kes_Data[$1e1]:=(jpide shr 8) and 255;
   Kes_Data[$1e2]:=cylinders and 255;
   Kes_Data[$1e3]:=(cylinders shr 8) and 255;
   Kes_Data[$1e4]:=heads;
+  if (src=3) or (dst=3) then Kes_Data[$1e5]:=$10 else Kes_Data[$1e5]:=0;
   Kes_Buffer_Transfer(true, 512);
+  Kes_Exec;
+
+  { Festplatten-Parameter MFM setzen }
+  Kes_Buffer_Clear;
+  Kes_Load_Exec_Const(InitHDD);
+  Kes_Data[$1e0]:=0;
+  Kes_Data[$1e1]:=$10;
+  Kes_Data[$1e2]:=cylinders and 255;
+  Kes_Data[$1e3]:=(cylinders shr 8) and 255;
+  Kes_Data[$1e4]:=heads;
+  Kes_Buffer_Transfer(true, 512);
+  Kes_Exec;
+
+  { Festplatten-Info von IDE holen }
+  Kes_Buffer_Clear;
+  Kes_Load_Exec_Const(IdeInfo);
+  Kes_Buffer_Transfer(true, 512);
+  Kes_Exec;
+  Kes_Buffer_Transfer(false, 1280);
+
+  { testen, ob die aktuelle CHS-Translation den geforderten Platten-Parametern entspricht }
+  if (((src=2) or (dst=2)) and ((heads<>Kes_Data[$100+55*2]+(Kes_Data[$101+55*2] shl 8))
+       or (Kes_Data[$100+56*2]<>17) or (Kes_Data[$101+56*2]<>0))) or
+       (((src=3) or (dst=3)) and ((heads<>Kes_Data[$300+55*2]+(Kes_Data[$301+55*2] shl 8))
+       or (Kes_Data[$300+56*2]<>17) or (Kes_Data[$301+56*2]<>0))) then
+    begin
+      writeln('Warnung: CHS-Translations-Parameter der IDE-Festplatte sind nicht korrekt gesetzt.');
+      writeln('F'+#129+'r LBA-Firmware ist das OK, bei CHS-Firmware wird die Kopie unbrauchbar sein.');
+      write('Trotzdem starten? (j/n):');
+      readln(s);
+      if (s<>'j') and (s<>'J') then 
+        begin
+          writeln('Ja. Besser nicht.');
+          exit;
+        end;
+      end;
+
+  { Chan B-Handler installieren }
+  Kes_Buffer_Clear;
+  Kes_Load_Exec_Const(Sector);
+  Kes_Buffer_Transfer(true, 100);
   Kes_Exec;
 
   { Kopieren }
@@ -206,35 +255,53 @@ begin
   cyl:=0;
   hd:=0;
   sect:=0;
-  repeat 
+  error:=0;
+  repeat
+    if (cyl=cylinders-1) and (hd=heads-1) then error:=50; { letzte Sektoren einzeln kopieren }
   { Sektor in KES-Buffer lesen }
-    Mem[$4A:6]:=4;  { Lese-Kommando }
+    Mem[$4A:6]:=5;  { Lese-Kommando }
     if src=1 then MemW[$4A:7]:=$1000 else MemW[$4A:7]:=jpide;  { Sprungvektor zur Kontroller-Firmware, entweder MFM oder IDE }
     if src=2 then Mem[$4A:9]:=0 else Mem[$4A:9]:=$10; { bei IDE: Primary oder Secundary? }
     MemW[$4A:10]:=cyl;  { Cylinder }
     Mem[$4A:12]:=hd;  { Kopf }
     Mem[$4A:13]:=sect; { Sektor }
+    if error=0 then Mem[$4A:14]:=16 else Mem[$4A:14]:=2; { Anzahl Bytes (high) }
     Port[$4B]:=1; { KES-Kanal B Wakeup }
     write(#13+'Cylinder:'+inttostr(cyl)+'Head:'+inttostr(hd)+'Sektor:'+inttostr(sect+1));
-    repeat until Mem[$4A:6]<>4;  { Warten bis fertig-Meldung }
-    if Mem[$4A:6]<>0 then inc(readerr);  { Lesefehler zaehlen }
+    repeat until Mem[$4A:6]<>5;  { Warten bis fertig-Meldung }
+    if Mem[$4A:6]<>0 then
+      begin
+        inc(readerr);  { Lesefehler zaehlen }
+        error:=20;
+      end;
 
   { Sektor aus KES-Buffer schreiben }
-    Mem[$4A:6]:=6; { Schreib-Kommando }
+    Mem[$4A:6]:=7; { Schreib-Kommando }
     if dst=1 then MemW[$4A:7]:=$1000 else MemW[$4A:7]:=jpide;  { Sprungvektor zur Kontroller-Firmware, entweder MFM oder IDE }
     if dst=2 then Mem[$4A:9]:=0 else Mem[$4A:9]:=$10; { bei IDE: Primary oder Secundary? }
+    if error=0 then Mem[$4A:14]:=16 else Mem[$4A:14]:=2; { Anzahl Bytes (high) }
     Port[$4B]:=1; { KES-Kanal B Wakeup }
     write('Lesefehler:'+inttostr(readerr));
-    repeat until Mem[$4A:6]<>6;  { Warten bis fertig-Meldung }
-    if Mem[$4A:6]<>0 then inc(writeerr);  { Schreibfehler zaehlen }
+    repeat until Mem[$4A:6]<>7;  { Warten bis fertig-Meldung }
+    if Mem[$4A:6]<>0 then
+      begin
+        inc(writeerr);  { Schreibfehler zaehlen }
+        error:=20;
+      end;
     write('Schreibfehler:'+inttostr(writeerr));
 
-  { CHS um eins hochzaehlen }
-    inc(sect);          
+  { CHS hochzaehlen }
+    if error=0 then 
+      inc(sect,8)  { Fehlerfreier Durchgang: 8 Sektoren }
+    else
+      begin
+        inc(sect); { Fehlerhafter Durchgang: 1 Sektor }
+        dec(error);
+      end;
     if sect>16 then
       begin
         inc(hd);
-        sect:=0;
+        sect:=sect-17;
       end;
     if hd>=heads then
       begin
@@ -242,5 +309,14 @@ begin
         hd:=0;
       end;
   until cyl>=cylinders; { bis zum letzten Zylinder wiederholen }
+
+  { vorherigen Chan B-Handler wiederherstellen }
+  Kes_Buffer_Clear;
+  Kes_Load_Exec_Const(ResetChB);
+  Kes_Data[1]:=oldchb and 255;
+  Kes_Data[2]:=(oldchb shr 8) and 255;
+  Kes_Buffer_Transfer(true, 10);
+  Kes_Exec;
+  
   writeln(#13+#10+'Kopiervorgang beendet.');
 end.
