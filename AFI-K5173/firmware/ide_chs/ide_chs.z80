@@ -38,7 +38,7 @@
 ; 6. Der LBA-Modus wird nur verwendet, wenn die gewuenschte CHS-Translation
 ;    von der Festplatte nicht angenommen wird.
 ;
-; Version: 0.5
+; Version: 0.6
 ; Features:
 ; - Schalterstellungen: 0=MFM, 1=Primary IDE, 2=Secundary IDE
 ; - IDE-Adressmodus: CHS oder LBA28
@@ -62,12 +62,16 @@
 ; Das LED-Leuchten ist etwas verlaengert, damit die LED's etwas besser erkennbar sind
 ; Bugfix: Stiller CHS-Translation Fail, wenn Platte die Translation nicht annimmt
 ; Bugfix: Fehlernder Sektor-Inhalt bei DMA-Transfers, wenn die Sektorgrenze genau an der Segmentgrenze liegt
+; V0.6
+; Paralell zur IDE-Platte die Koepfe der MFM-Platte bewegen, fuer Schauzwecke, dieses Feature ist standardmaessig deaktiviert
 
 ; ***************************************************************
 ; Schalter fuer Features:
 CHAN2Interface  equ     1               ; 0 = deaktivieren, 1 = aktivieren
 ForceCHS        equ     0               ; 1 = CHS erzwingen
 ForceLBA        equ     0               ; 1 = LBA erzwingen
+MoveMFM         equ     0               ; 1 = Kopfbewegung auf der MFM-Festplatte
+
 
 ; ***************************************************************
 ; Parameter von und zur KES
@@ -83,6 +87,7 @@ KHOSTOFS        equ     $3b2e+18        ; Buffer im HOST-Speicher, schon in KES-
 KHOSTSEG        equ     $3b2e+20        ; Buffer im HOST-Speicher, schon in KES-Mapping umgerechnet, IO-Teil
 ALLBYTECOUNT    equ     $3b2e+22        ; Gesamtanzahl bytes
 
+
 ; Speicher fuer AFI
 MLBA1           equ     $3a00           ; 48bit=6byte
 MSECCOUNT       equ     $3a06
@@ -95,6 +100,7 @@ MCYLINDERCT     equ     $3a12           ; Anzahl Zylinder
 MACCMODE        equ     $3a14           ; $00=CHS $01=LBA
 MLEDRTIMER      equ     $3a15           ; Leuchtzeit der Lese-LED verlaengern
 MLEDWTIMER      equ     $3a16           ; Leuchtzeit der Schreib-LED verlaengern
+M_MFM_MOVE      equ     $3a17           ; 1=MFM-Festplatte ist angeschlossen
 
 
 MDMA_PARAM      equ     $3a40           ; 21 bytes, Kopie von dma_param_st
@@ -112,6 +118,11 @@ REG_SWITCH      equ     $B1             ; IO-Port Steuerregister (Lesen)
 REG_RESET       equ     $B2             ; IO-Port 16Bit-Toggler Reset (Lesen)
 REG_HOSTSEL     equ     $1C             ; IO-Port Hostspeicher Bit 14-19
 REG_USB         equ     $B3             ; IO-Port USB-Platine
+REG_MFM_CylL    equ     $A4             ; IO-Port MFM Zylinder Low
+REG_MFM_CylH    equ     $A5             ; IO-Port MFM Zylinder High
+REG_MFM_Status  equ     $A7             ; IO-Port MFM Status (Lesen)
+REG_MFM_Cmd     equ     $A7             ; IO-Port MFM Kommando (Schreiben)
+REG_MFM_SDH     equ     $A8             ; IO-Port MFM SDH (Schreiben)
 
 
 ; ***************************************************************
@@ -147,7 +158,6 @@ Reset:          ld      a,$38
                 ld      hl,HDDService   
                 ld      ($3b6b),hl      ; Jump-Vector HDD Service
                 ret
-
 Reset_1:        cp      a,$20           ; Schalter "2"
                 jr      nz,Reset_2
                 ld      a,$10           ; secundary IDE
@@ -155,7 +165,6 @@ Reset_1:        cp      a,$20           ; Schalter "2"
                 ld      hl,HDDService   
                 ld      ($3b6b),hl      ; Jump-Vector HDD Service
                 ret
-
 Reset_2:        ret
 
 
@@ -251,7 +260,7 @@ HDD_Init:       ld      ix,(BUFFER)     ; Festplattenparameter sichern
                 ld      a,(ix+4)
                 ld      (MSECTORCT),a
 
-                ld      d,20
+                ld      d,5
                 ld      hl,0
 HDD_Init_1:     ld      b,$16
                 ld      a,(MIDE_DEVICE)
@@ -271,6 +280,34 @@ HDD_Init_1:     ld      b,$16
                 jr      IDE_NotReady
 
 HDD_Init_2:
+
+    if MoveMFM=1
+                xor     a
+                ld      (M_MFM_MOVE),a  ; Move MFM erstmal deaktivieren
+                ld      b,a
+                ld      a,$48           ; erste MFM-Platte aktivieren, MFM-HDD-LED an, MFM-DMA deaktivieren
+                out     (REG_MFM_SDH),a
+MFM_Init_1:     djnz    MFM_Init_1      ; die Aktivierung dauert etwas
+                out     (REG_MFM_CylL),a ; wir probieren, etwas in ein MFM-Register zu schreiben
+                in      a,(REG_MFM_CylL) ; wieder auslesen
+                cp      a,$48           ; hat das Register gespeichert?
+                jr      nz,MFM_Init_5   ; nein? dann ist der MFM-Kontroller nicht mehr da.
+                ld      a,$10           ; MFM-Kommando: restore (init)
+                out     (REG_MFM_Cmd),a
+                ld      hl,0            ; Warten
+MFM_Init_2:     in      a,(REG_MFM_Status) ; Status auslesen
+                cp      a,$50
+                jr      z,MFM_Init_4    ; Ende und OK? Dann fertig
+                dec     l
+                jr      nz,MFM_Init_2
+                dec     h
+                jr      nz,MFM_Init_2
+                jr      MFM_Init_5
+MFM_Init_4:     ld      a,1             ; Move MFM aktivieren
+                ld      (M_MFM_MOVE),a
+MFM_Init_5:     ld      a,$60           ; erste MFM-Platte wieder deaktivieren, MFM-HDD-LED wieder aus
+                out     (REG_MFM_SDH),a
+    endif
 
     if ForceLBA=0
                 ld      ix,(BUFFER)
@@ -322,6 +359,40 @@ IDE_Transfer:   ld      e,a
 
                 ld      hl,(CYLINDER)   ; Start-CHS muss im ERROR-Register zurueckgegeben werden
                 ld      (ERRORREG+3),hl
+                
+    if MoveMFM=1
+                ld      a,(M_MFM_MOVE)  ; Ist das Move MFM aktiviert?
+                cp      a,1
+                jr      nz,MFM_Move_2   ; Nein? Dann eben nicht.
+                ld      a,$48
+                out     (REG_MFM_SDH),a ; MFM DSEL 1 (und MFM-LED)
+                ld      b,0
+MFM_Move_0:     djnz    MFM_Move_0      ; kurz warten
+                in      a,(REG_MFM_Status)
+                cp      a,$50           ; Status: ready?
+                jr      nz,MFM_Move_2   ; Nein, dann lassen wir das MFM in Ruhe
+                ld      a,l             ; Zylindernummer in die MFM-Register schreiben
+                out     (REG_MFM_CylL),a
+                ld      a,h
+                and     a,$01           ; nur bis Zylinder 511
+                out     (REG_MFM_CylH),a
+                ld      a,$70           ; MFM-Kommando: SEEK Zylinder
+                out     (REG_MFM_Cmd),a
+                ld      hl,$8000        ; Warten
+MFM_Move_1:     in      a,(REG_MFM_Status)
+                cp      a,$50
+                jr      z,MFM_Move_2    ; Status: fertig?
+                dec     l
+                jr      nz,MFM_Move_1
+                dec     h
+                jr      nz,MFM_Move_1
+                ld      a,$c0           ; die Zeit ist um! Irgendwas ist hier schief gelaufen
+                out     (REG_MFM_SDH),a ; MFM-Kontroller resetten
+                xor     a               ; Move MFM deaktivieren
+                ld      (M_MFM_MOVE),a
+MFM_Move_2:
+    endif
+                
                 ld      hl,(HEAD)       ; das ist auch noch +SEKTOR
                 ld      (ERRORREG+5),hl
 
@@ -388,6 +459,10 @@ IDE_Trans_10:   call    IDE_HOST_DMA
                 jr      c,IDE_Trans_11
                 ld      bc,$1000        ; Errorcode: Sektor nicht gefunden
 IDE_Trans_11:   ld      (ERRORREG),bc
+    if MoveMFM=1
+                ld      a,$60
+                out     (REG_MFM_SDH),a
+    endif
                 xor     a
                 ld      (ERRORREG+2),a
                 ld      a,(MSECCOUNT)

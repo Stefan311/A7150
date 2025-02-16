@@ -26,12 +26,12 @@ Features:
 ---
 [IDE im CHS-Modus:](ide_chs/)
 
-Firmware zum Ansteuern von IDE-Festplatten im älteren CHS-Modus.
+Firmware zum Ansteuern von IDE-Festplatten im CHS-Modus. Für die meisten Anwendungen empfohlen.
 
 Hinweise:
 + der CHS-Modus ist nicht mehr Bestandteil der ATA-Spezifikation, allerdings scheinen auch moderne IDE-Platten diesen Modus immer noch zu unterstützen.
 + da die aufwändige CHS-Umrechnung durch die IDE-Platte selber gemacht wird, ist der CHS-Modus etwas schneller als der LBA-Modus.
-+ Es sind nur CHS-Parameter Kombinationen erlaubt, die durch die IDE-Interne CHS-Translation erlaubt sind. Welche das sind, hängt von den eingesetzten Festplatten ab. Die Platten, die ich bisher getestet habe, fressen ALLES.
++ Wird eine CHS-Parametrierung gewählt, die die Festplatte nicht unterstützt, dann wird automatisch zum LBA-Modus gewechselt. Die meisten Platten unterstützen jedoch alle CHS-Kombinationen.
 + Durch die CHS-Translation sind damit Beschriebene Platten relativ gut PC-Kompatibel
 + Platten, die mit Version 0.1 beschrieben worden sind, sind ab 0.2 nicht mehr lesbar.
 
@@ -40,6 +40,7 @@ Features:
 + IDE-Adressmodus: CHS
 + Datentransfer mit Z80-DMA direkt in den Hostspeicher (~380KB/s)
 + Kanal B-Support für die CH375 USB-Platine
++ MFM-Mover-Option: Paralell zur IDE-Festplatte werden auch die Köpfe der MFM-Festplatte bewegt, es werden aber auf MFM keine Daten gelesen oder geschrieben. Für Leute, die den Sound von MFM-Festpalten mögen. Diese Option muss im Quelltext aktiviert, und neu compiliert werden.
 
 ---
 [Iomega ZIP100 Atapi:](atapi/)
@@ -56,3 +57,4 @@ Hinweise:
 Features:
 + Schalterstellungen: 0=MFM, 1=Primary ATAPI, 2=Secundary ATAPI
 + Datentransfer mit Z80-DMA in den KES-Buffer
++ Kanal B-Support für die CH375 USB-Platine

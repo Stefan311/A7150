@@ -25,7 +25,7 @@
 
 ; *********  Firmware fuer IDE-Kontroller AFI-K5173   ***********
 ; HINWEIS: das ist eine sehr fruehe Alpha-Version 
-; Version: 0.1
+; Version: 0.2
 ; Features:
 ; - Schalterstellungen: 0=MFM, 1=Primary ATAPI, 2=Secundary ATAPI
 ; - Spezial-Firmware fuer ATAPI-Diskettenlaufwerke wie Iomega ZIP100 (Atapi), Iomega ZIP250 (Atapi) oder LS120.
@@ -33,11 +33,18 @@
 ; - NICHT fuer CD-ROM-Laufwerke
 ; - Datentransfer mit Z80-DMA in den KES-Buffer
 ; - bisher nur mit Iomega ZIP100 Atapi getestet
+; - Unterstuetzung des Kanal B fuer den USB-Kontroller 
 ;
 ; Version Log:
 ; V0.1
 ; Basisversion, basierend auf ide V0.4
+; V0.2
+; - Unterstuetzung des Kanal B fuer den USB-Kontroller von IDE_CHS V0.5 uebernommen
+; - Bugfix gegen Probleme direkt nach dem Einschalten
 
+; ***************************************************************
+; Schalter fuer Features:
+CHAN2Interface  equ     1               ; 0 = deaktivieren, 1 = aktivieren
 
 ; ***************************************************************
 ; Parameter von und zur KES
@@ -69,6 +76,8 @@ REG_DATA        equ     $B0             ; IO-Port IDE-Daten (Lesen und Schreiben
 REG_STEUER      equ     $B1             ; IO-Port Steuerregister (Schreiben)
 REG_SWITCH      equ     $B1             ; IO-Port Steuerregister (Lesen)
 REG_RESET       equ     $B2             ; IO-Port 16Bit-Toggler Reset (Lesen)
+REG_HOSTSEL     equ     $1C             ; IO-Port Hostspeicher Bit 14-19
+REG_USB         equ     $B3             ; IO-Port USB-Platine
 
 
 ; Einsprungpunkte von KES-Firmware
@@ -84,10 +93,14 @@ Reset:          in      a,(REG_SWITCH)  ; Betriebsarten-Schalter
                 and     a,$f0
                 ret     z               ; bei Schalter "0" die AFI nicht initialisieren, fuer Debug hilfreich
 
-                ld      a,$18           ; IDE-Reset Signal
-                out     (REG_STEUER),a
-                ld      b,100
-Reset_1:        djnz    Reset_1
+    if  CHAN2Interface=1
+                call    Chan2Reset
+    endif
+
+;                ld      a,$18           ; IDE-Reset Signal
+;                out     (REG_STEUER),a
+;                ld      b,100
+;Reset_1:        djnz    Reset_1
                 ld      a,$38
                 out     (REG_STEUER),a
                 ld      (MIDE_STEUER),a
@@ -112,10 +125,6 @@ Reset_2:        cp      a,$20           ; Schalter "2"
                 ret
 
 Reset_3:        ret
-
-; ***************************************************************
-Chan2:          scf                     ; Carry gesetzt heisst kein Fertig-Interrupt im Hostsystem ausloesen
-                ret
 
 ; ***************************************************************
 ; Wird zyklisch aufgerufen
@@ -213,7 +222,8 @@ HDD_Transfer:   ld      hl,(CYLINDER)   ; Start-CHS muss im ERROR-Register zurue
                 ld      bc,$1000        ; wir machen nur 512-Byte-Sektoren, also: Errorcode: Sektor nicht gefunden
                 jr      HDD_Ende
 
-HDD_Trans_0:    call    CHS2LBA
+HDD_Trans_0:    call    IDE_CheckReady
+                call    CHS2LBA
                 ld      a,(MIDE_DEVICE)
                 ld      b,$16
                 call    IDE_Setreg
@@ -544,6 +554,25 @@ AddCHS:         ld      a,(SECTOR)
 
 
 ; ***************************************************************
+IDE_CheckReady: ld      a,(MIDE_DEVICE)
+                ld      b,$16
+                call    IDE_Setreg
+IDE_CheckRdy_2: ld      c,$17
+                call    IDE_Getreg
+                bit     3,a
+                ret     z
+                ld      a,(MIDE_STEUER)
+                and     a,$E0
+                out     (REG_STEUER),a
+                ld      hl,$8000
+                ld      c,REG_DATA
+                ld      b,0
+                inir
+                otir
+                jr      IDE_CheckRdy_2
+
+
+; ***************************************************************
 ; Z80-DMA Parameter
 dma_param_st:   db      $C3             ; Reset
                 db      $79             ; Transfer B-->A
@@ -573,6 +602,14 @@ dma_param_en:   db      0
                 db      $51             ; ROM-Kennung: Custom Messplatine Teil 1
                 dw      0               ; CRC, diese wird spaeter mit dem CRCTOOL berechnet
 
+; ***************************************************************
+    if  CHAN2Interface=1
+    include "chan2.z80"      ; echte Service-Routine fuer Kanal 2 (optional)
+    else
+; Dummy-Service-Routine fuer Kanal 2
+Chan2:          scf                     ; Carry gesetzt heisst kein Fertig-Interrupt im Hostsystem ausloesen
+                ret
+    endif
 
 ; ***************************************************************
                 org     $5ffc
