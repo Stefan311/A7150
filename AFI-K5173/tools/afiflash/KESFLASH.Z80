@@ -1,5 +1,5 @@
         org     $2100
-        ld      hl,$0543    ;   AFI-Funktionen deaktivieren, die koennen sonst die autodetection stoeren
+        ld      hl,$0532    ;   AFI-Funktionen deaktivieren, die koennen sonst die autodetection stoeren
         ld      ($3b80),hl
         ld      ($3b83),hl
         ld      hl,$1000    ;   Original MFM-Firmware
@@ -16,10 +16,10 @@
         ld      ($3b7a),hl
 
         ld      hl,fn       ;   Kommando-Handler
-        ld      de,$3e80    ;   in einen unbenutzten RAM-Bereich
+        ld      de,$3a00    ;   in einen unbenutzten RAM-Bereich
         ld      bc,fe-fn
         ldir                ;   kopieren
-        ld      hl,$3e80    ;   und als Interruptvector
+        ld      hl,$3a00    ;   und als Interruptvector
         ld      ($3b7d),hl  ;   installieren
         ret
 

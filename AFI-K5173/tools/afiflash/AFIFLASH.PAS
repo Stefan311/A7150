@@ -318,7 +318,7 @@ begin { Hauptprogramm }
                   'N' : writeln('Nederlandse vertaling en verbeteringen: A.S. Kerkmeester, www.flashbios.org');
                    else writeln('Dutch translation and improvement: A.S. Kerkmeester, www.flashbios.org')
   end{case};
-  writeln('A7150-Port 2022/23 von Stefan Berndt');
+  writeln('A7150-Port 2022-25 von Stefan Berndt');
 
   if (ParamCount>=2) and (ParamCount<=4) then begin
     ok:=true;
@@ -421,32 +421,6 @@ begin { Hauptprogramm }
         if (info and $ff00) = $fe00 then writeln('High Bootblock programmable.');
         if (info and $ff00) = $ff00 then writeln('High Bootblock locked!');
       end;
-
-    if not Lesen and (mfg<>UnknownMfg) and (memsize>0) and (memsize<>datsize) then begin
-        ok:=false;
-        case sprache of 'D' : writeln('Gr'+#148+#225+'en von Bin'+#132+'rdatei und Flash-Baustein passen nicht zusammen:');
-                        'N' : writeln('De grootte van het binaire bestand en de chip komen niet overeen:');
-                        else writeln('Sizes of binary file and chip don''t match:')
-        end{case};
-        case sprache of 'D' : write('Datei: ',(datsize SHR 10),' KByte ');
-                        'N' : write('Bestand: ',(datsize SHR 10),' KByte ');
-                        else write('File: ',(datsize SHR 10),' KByte ')
-        end{case};
-        if (datsize>memsize) then write('>') else write('<');
-        case sprache of 'D' : writeln(' Baustein: ',(memsize SHR 10),' KByte.');
-                        'N' : writeln(' Chip: ',(memsize SHR 10),' KByte.');
-                        else writeln(' Chip: ',(memsize SHR 10),' KByte.')
-        end{case};
-        if (datsize<memsize) then begin
-        case sprache of 'D' : write('Baustein trotzdem schreiben (wird mit $FF aufgef'+#129+'llt) (J/N)? ');
-                        'N' : write('De chip in elk geval beschrijven (in het geheel met $FF) (J/N)? ');
-                            else write('Write chip anyway (will be filled up with $FF) (Y/N)? ')
-        end{case};
-        GetKey('');
-        ok:=(d in ['j','J','y','Y']);
-        writeln;
-        end;
-    end;
 
     if ok and not Lesen and (mfg<>UnknownMfg) and (memsize>0) then begin
 

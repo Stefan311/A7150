@@ -121,7 +121,6 @@ procedure Schreiben;
   procedure WriteWinbond;
     procedure WriteWinPage;
     begin
-      end{case};
       i:=sizeof(puffer);
       while ok and (adr<datsize) do begin
         if (i>=sizeof(puffer)) and (adr<=(memsize-sizeof(puffer))) then begin
@@ -131,6 +130,7 @@ procedure Schreiben;
         write(ATH(adr));
         case dev of $C1,$45 : Flash_Kes(fl_at1);
                     $46     : Flash_Kes(fl_at2);
+        end{case};
         write(#8#8#8#8#8#8);
       end;
       write(ATH(adr)); writeln;
