@@ -45,11 +45,12 @@ var
     sidecylinder: word;
     sideheads: byte;
 
-    a: word;
+    a, b: word;
     s: string;
     src,dst: byte;
     cylinders: word;
     heads: byte;
+    retrys: word;
 
 	oldchb: word;
 	
@@ -58,6 +59,7 @@ var
     sect: byte;
     readerr: word;
     writeerr: word;
+    retrycnt: word;
 
     error: byte;
 
@@ -186,6 +188,18 @@ begin
       exit;
     end;
 
+  if src=1 then
+    begin
+      write('Wie oft soll bei Lesefehlern das Lesen wiederholt werden? (zahl):');
+      readln(s);
+      val(s,retrys,b);
+      if b<>0 then
+        begin
+          writeln('Diese Eingabe war ung'+#129+'ltig.');
+          exit;
+        end;
+    end;
+
   { Letzte Warnung! }
   writeln('Die '+DiskNames[src]+'-Festplatte soll auf die '+DiskNames[dst]+'-Festplatte kopiert werden?');
   writeln('ACHTUNG! Die Daten auf der '+DiskNames[dst]+'-Festplatte werden '+#129+'berschrieben!');
@@ -256,24 +270,40 @@ begin
   hd:=0;
   sect:=0;
   error:=0;
+  retrycnt:=0;
   repeat
     if (cyl=cylinders-1) and (hd=heads-1) then error:=50; { letzte Sektoren einzeln kopieren }
   { Sektor in KES-Buffer lesen }
-    Mem[$4A:6]:=5;  { Lese-Kommando }
-    if src=1 then MemW[$4A:7]:=$1000 else MemW[$4A:7]:=jpide;  { Sprungvektor zur Kontroller-Firmware, entweder MFM oder IDE }
-    if src=2 then Mem[$4A:9]:=0 else Mem[$4A:9]:=$10; { bei IDE: Primary oder Secundary? }
-    MemW[$4A:10]:=cyl;  { Cylinder }
-    Mem[$4A:12]:=hd;  { Kopf }
-    Mem[$4A:13]:=sect; { Sektor }
-    if error=0 then Mem[$4A:14]:=16 else Mem[$4A:14]:=2; { Anzahl Bytes (high) }
-    Port[$4B]:=1; { KES-Kanal B Wakeup }
-    write(#13+'Cylinder:'+inttostr(cyl)+'Head:'+inttostr(hd)+'Sektor:'+inttostr(sect+1));
-    repeat until Mem[$4A:6]<>5;  { Warten bis fertig-Meldung }
-    if Mem[$4A:6]<>0 then
-      begin
-        inc(readerr);  { Lesefehler zaehlen }
-        error:=20;
-      end;
+    b:=retrys;
+    repeat
+      Mem[$4A:6]:=5;  { Lese-Kommando }
+      if src=1 then MemW[$4A:7]:=$1000 else MemW[$4A:7]:=jpide;  
+                            { Sprungvektor zur Kontroller-Firmware, entweder MFM oder IDE }
+      if src=2 then Mem[$4A:9]:=0 else Mem[$4A:9]:=$10; { bei IDE: Primary oder Secundary? }
+      MemW[$4A:10]:=cyl;  { Cylinder }
+      Mem[$4A:12]:=hd;  { Kopf }
+      Mem[$4A:13]:=sect; { Sektor }
+      if error=0 then Mem[$4A:14]:=16 else Mem[$4A:14]:=2; { Anzahl Bytes (high) }
+      Port[$4B]:=1; { KES-Kanal B Wakeup }
+      write(#13+'Cylinder:'+inttostr(cyl)+'Head:'+inttostr(hd)+'Sektor:'+inttostr(sect+1));
+      repeat until Mem[$4A:6]<>5;  { Warten bis fertig-Meldung }
+      if Mem[$4A:6]<>0 then
+        begin
+          error:=20;
+          if b>1 then
+            begin;
+              dec(b);
+              inc(retrycnt);
+            end
+          else
+            begin;
+              inc(readerr);  { Lesefehler zaehlen }
+              b:=0;
+            end;
+        end
+      else
+        b:=0;
+    until b=0;
 
   { Sektor aus KES-Buffer schreiben }
     Mem[$4A:6]:=7; { Schreib-Kommando }
@@ -281,14 +311,15 @@ begin
     if dst=2 then Mem[$4A:9]:=0 else Mem[$4A:9]:=$10; { bei IDE: Primary oder Secundary? }
     if error=0 then Mem[$4A:14]:=16 else Mem[$4A:14]:=2; { Anzahl Bytes (high) }
     Port[$4B]:=1; { KES-Kanal B Wakeup }
-    write('Lesefehler:'+inttostr(readerr));
+    write('Lesef.:'+inttostr(readerr));
+    if src=1 then write('Wdh:'+inttostr(retrycnt));
     repeat until Mem[$4A:6]<>7;  { Warten bis fertig-Meldung }
     if Mem[$4A:6]<>0 then
       begin
         inc(writeerr);  { Schreibfehler zaehlen }
         error:=20;
       end;
-    write('Schreibfehler:'+inttostr(writeerr));
+    write('Schreibf.:'+inttostr(writeerr));
 
   { CHS hochzaehlen }
     if error=0 then 
