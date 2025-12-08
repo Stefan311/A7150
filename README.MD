@@ -5,3 +5,4 @@ It's an old computer from the east german "Robotron" company. See [Wikipedia](ht
 It's made for and with an german audience in mind. The A7150 is rare outside the former east german country anyway.
 ### Projekte
 [IDE-Kontroller AFI-K5173](AFI-K5173/)
+[Experimentier-Karte](Exp/)
