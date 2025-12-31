@@ -9,10 +9,10 @@
 static int s_retry_num = 0;
 esp_netif_t* net_if = NULL;
 uint8_t current_mode = 0; /* 0=Offline    1=WPS   2=STA   3=AP */
-uint8_t wlan_mode = 2;
-char* wlan_ssid = "mein Wlan";
+uint8_t wlan_mode = 0;
+char* wlan_ssid;
 char* ap_ssid;
-char* wlan_passwd = "mein geheimes wlanpasswort";
+char* wlan_passwd;
 
 static wifi_config_t wifi_config =
 {
@@ -188,6 +188,7 @@ void setup_wlan(uint8_t new_mode)
 
 	if (new_mode==3)
 	{
+		ap_ssid = heap_caps_malloc(64, MALLOC_CAP_DEFAULT);
 		esp_netif_init();
 		esp_event_loop_create_default();
 		net_if = esp_netif_create_default_wifi_ap();	

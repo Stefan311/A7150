@@ -9,18 +9,28 @@
 
 #include "wlan.h"
 #include "nvs.h"
-#include "nvs_flash.h"
 #include "xapp058/micro.h"
 
 #include <driver/gpio.h>
 #include "soc/gpio_reg.h"
 #include "soc/soc.h"
 #include "esp_timer.h"
+#include "cmdline.h"
+#include "pthread.h"
 
 #define PIN_TDI    41
 #define PIN_TDO    13
 #define PIN_TCK    45
 #define PIN_TMS    39
+
+void cmdline_task(void*)
+{
+    while (1)
+    {
+        run_cmdline();
+        usleep(10000);
+    }
+}
 
 void app_main(void)
 {
@@ -36,6 +46,8 @@ void app_main(void)
     pincfg.pull_down_en = false;
     ESP_ERROR_CHECK(gpio_config(&pincfg));
 
-    nvs_flash_init();
-    setup_wlan(2);
+    setup_flash();
+    restore_settings();
+    setup_wlan(wlan_mode);
+    xTaskCreatePinnedToCore(cmdline_task,"cmdline_task",5000,NULL,0,NULL,1);
 }
