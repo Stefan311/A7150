@@ -57,7 +57,7 @@ void setup_spi()
         .mode = 0,
     	.cs_ena_pretrans = 0,
 		.cs_ena_posttrans = 0,
-        .clock_speed_hz = SPI_MASTER_FREQ_8M,
+        .clock_speed_hz = SPI_MASTER_FREQ_20M,
         .flags = SPI_DEVICE_HALFDUPLEX,
 	    .queue_size=1,
 		.spics_io_num = 14,

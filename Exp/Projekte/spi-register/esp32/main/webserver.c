@@ -68,6 +68,7 @@ static esp_err_t uploader_get_handler(httpd_req_t *req)
     httpd_resp_sendstr_chunk(req, "} else if (xhttp.status == 0) {alert(\"Server closed the connection abruptly!\");location.reload()\r\n");
     httpd_resp_sendstr_chunk(req, "} else {alert(xhttp.status + \" Error!\\n\" + xhttp.responseText);\r\nlocation.reload()\r\n}\r\n}\r\n};\r\n");
     httpd_resp_sendstr_chunk(req, "xhttp.open(\"POST\", \"/xapp058/upload_flash\", true);\r\nxhttp.send(file);\r\n}\r\n</script>");
+    httpd_resp_sendstr_chunk(req, "<br><br><a href=\"/spi_test.html\">SPI-Register-Test</a>");
     httpd_resp_sendstr_chunk(req, "</body></html>");
     httpd_resp_sendstr_chunk(req, NULL);
     return ESP_OK;
