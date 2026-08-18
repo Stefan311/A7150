@@ -8,12 +8,14 @@
 #include <unistd.h>
 #include "mms16_master_spi.h"
 #include <ctype.h>
+#include "cmd_scp.h"
 
 uint32_t menulevel = 0;
 char * buffer = NULL;
 uint8_t * xsvfdata = NULL;
 uint32_t xsvfoffset = 0;
 uint8_t base64ptr = 0;
+
 
 // Char an USB-Serial ausgeben, wird direkt in den Sendebuffer geschrieben
 void printChar(char ch)
@@ -24,6 +26,7 @@ void printChar(char ch)
         if (USB_SERIAL_JTAG.ep1_conf.serial_in_ep_data_free) // Ausgabe nur wenn Platz im Buffer ist
         {
             USB_SERIAL_JTAG.ep1.rdwr_byte = (uint8_t)ch; // byte ausgeben
+            USB_SERIAL_JTAG.ep1_conf.wr_done=1; // Buffer senden
             return;
         }
         i++;
@@ -36,7 +39,17 @@ void printString(char * text, uint32_t len)
 {
     for (int i=0;i<len && text[i]!=0; i++)
     {
-        printChar(text[i]);
+        uint32_t j = 0;
+        while (j<100)
+        {
+            if (USB_SERIAL_JTAG.ep1_conf.serial_in_ep_data_free) // Ausgabe nur wenn Platz im Buffer ist
+            {
+                USB_SERIAL_JTAG.ep1.rdwr_byte = (uint8_t)text[i]; // byte ausgeben
+                break;
+            }
+            j++;
+            esp_rom_delay_us(100);
+        }
     }
     USB_SERIAL_JTAG.ep1_conf.wr_done=1; // Buffer senden
 }
@@ -63,6 +76,8 @@ uint32_t parseAddress(char *str)
     }
     return (uint32_t)strtoul(str, NULL, 16);
 }
+
+#include <stdio.h>
 
 void processInput(char input)
 {
@@ -108,6 +123,10 @@ void processInput(char input)
                     printf("MMS16-Debugger\n?:kurze Hilfe\n");
                     memset(buffer,0,64);
                     menulevel = 5;
+                    return;
+                case '7':
+                    printf("SCP Tools\n1. SCP-Kernel laden\n2. RAM-Disk laden\n3. RAM-Disk speichern\n4. RAM-Disk Dir anzeigen\n");
+                    menulevel = 6;
                     return;
             }
             break;
@@ -194,8 +213,6 @@ void processInput(char input)
             uint8_t in = base64toByte(input);
             if (in<64)
             {
-                if (xsvfoffset<10 || xsvfoffset>136290) printChar(input);
-                if (xsvfoffset==100) printChar('-');
                 switch (base64ptr)
                 {
                     case 0:
@@ -217,10 +234,6 @@ void processInput(char input)
                         break;
                 }
                 base64ptr = (base64ptr+1) & 3;
-                if ((xsvfoffset & 0x3ff)==0)
-                {
-                    //printf("\r%ld KB geladen\r",xsvfoffset/1024);
-                }
             }
             else if (input=='=')
             {
@@ -341,9 +354,10 @@ void processInput(char input)
                         case 'q':
                             printf("exit\n");
                             menulevel = 0;
-                            break;                         
+                            break;
                         case '?':
-                            printf("\nSpeicher anzeigen: d <addr> (anzahl)\nSpeicher schreiben: e <addr> <wert> (...werte)\nIO-Eingaben: i <addr>\nIO-Ausgeben: o <addr> <wert>\nQuit: q\n");
+                            printf("\nSpeicher anzeigen: d <addr> (anzahl)\nSpeicher schreiben: e <addr> <wert> (...werte)\nIO-Eingaben: i <addr>\n");
+                            printf("IO-Ausgeben: o <addr> <wert>\nQuit: q\n");
                             break;
                     }
                     memset(buffer,0,64);
@@ -376,8 +390,31 @@ void processInput(char input)
                     return;
             }
             return;
+        case 6: // SCP Tools
+            switch (input)
+            {
+                case '1': // SCP-Kernel und RAM-Disk laden
+                    scp_kernel_to_mms();
+                    return;
+                case '2': // RAM-Disk laden
+                    flash_to_mms();
+                    return;
+                case '3': // RAM-Disk speichern
+                    mms_to_flash();
+                    return;
+                case '4': // RAM-Disk Dir anzeigen
+                    scp_dir_mms();
+                    return;
+                case 27: // Escape
+                    printf("\nAbbruch\n");
+                    menulevel = 0;
+                    break;
+            }
+            printf("SCP Tools\n1. SCP-Kernel laden\n2. RAM-Disk laden\n3. RAM-Disk speichern\n4. RAM-Disk Dir anzeigen\n");
+            return;
     }
     printf("1: Wlan-Modus\n2: Wlan-SSID\n3: Wlan-Passwort\n4: alles speichern\n5: base64 encodierte .xsvf Datei empfangen.\n6: MMS-16-Debugger\n");
+    printf("7: SCP-Funktionen\n");
 }
 
 void run_cmdline()

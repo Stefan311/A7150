@@ -40,7 +40,7 @@ void app_main(void)
     {
         .pin_bit_mask = 1ULL<<PIN_TDO | 1ULL<<47,
         .mode = GPIO_MODE_INPUT,
-	      .pull_down_en = false,
+	    .pull_down_en = false,
     };
     ESP_ERROR_CHECK(gpio_config(&pincfg));
     pincfg.pin_bit_mask = 1ULL<<PIN_TDI | 1ULL<<PIN_TCK | 1ULL<<PIN_TMS;

@@ -52,7 +52,7 @@ end
 
 always @ (negedge MMS_BCLK)
 begin
-  if (!MMS_INIT || !esp_start)
+  if (!MMS_INIT || esp_start)
     begin
       step_o <= 0;
       timer <= 0;
@@ -63,9 +63,7 @@ begin
 		  // idle
         0: if (MMS_CBRQ) step_o <= 1;
 		  // Wunsch nach Busmaster anmelden, Auf Freigabe des Bus warten
-        1: if (!MMS_BPRN && MMS_BUSY && MMS_XACK) step_o <= 2;
-        2: if (!MMS_BPRN && MMS_BUSY && MMS_XACK) step_o <= 3; else step_o <= 1;
-        3: if (!MMS_BPRN && MMS_BUSY && MMS_XACK) step_o <= 4; else step_o <= 1;
+        1: if (!MMS_BPRN && MMS_BUSY && MMS_XACK) step_o <= 4;
 		  // Bus Übernehmen
         4: if (!MMS_BUSY) step_o <= 5;
         // Transfer Starten: Daten/Adressbus
@@ -105,10 +103,10 @@ assign MMS_CBRQ = (step_o>=1 && step_o<=3) ? 1'b0 : 1'bz;
 assign MMS_BUSY = (step_o>=4 && step_o<=12) ? 1'b0 : 1'bz;  
 
 // Bus Priorität
-assign MMS_BPRO = MMS_BPRN || step_o==1;
+assign MMS_BPRO = MMS_BPRN || (step_o>=1 && step_o<=8);
 
-wire trans1 = (step_o>=5) && (step_o<=9);
-wire trans2 = (step_o>=6) && (step_o<=8);
+wire trans1 = (step_o>=5) && (step_o<=9) && !esp_start;
+wire trans2 = (step_o>=6) && (step_o<=8) && !esp_start;
 
 assign MMS_ADR[23:0] = trans1 ? ~{spi_reg_in[23:16],spi_reg_in[31:24],spi_reg_in[39:32]} : 24'hzzzzzz;
 assign MMS_DATA[15:0] = (trans1 && (!spi_reg_in[41] || !spi_reg_in[42])) ? ~{spi_reg_in[7:0],spi_reg_in[15:8]} : 16'hzzzz;
@@ -118,16 +116,24 @@ assign MMS_IOWC = trans2 ? spi_reg_in[42] : 1'bz;
 assign MMS_MRDC = trans2 ? spi_reg_in[43] : 1'bz;
 assign MMS_IORC = trans2 ? spi_reg_in[44] : 1'bz;
 
-//assign DEBUG_PIN[3:0] = step_i;
+assign DEBUG_PIN[3:0] = step_o;
 
-assign DEBUG_PIN[0] = esp_done;
+/*assign DEBUG_PIN[0] = esp_done;
 assign DEBUG_PIN[1] = spi_clk;
 assign DEBUG_PIN[2] = spi_mosi;
-assign DEBUG_PIN[3] = spi_miso;
+assign DEBUG_PIN[3] = spi_miso;*/
 assign DEBUG_PIN[4] = !trans1;
 assign DEBUG_PIN[5] = !trans2;
 assign DEBUG_PIN[6] = spi_cs0;
 assign DEBUG_PIN[7] = spi_cs1;
-assign DEBUG_PIN[15:8] = ~MMS_ADR[7:0];//spi_reg_in[39:32];//~MMS_DATA[7:0];
+assign DEBUG_PIN[8] = MMS_BCLK;
+assign DEBUG_PIN[9] = MMS_MRDC;
+assign DEBUG_PIN[10] = esp_start;
+assign DEBUG_PIN[11] = MMS_BPRO;
+assign DEBUG_PIN[12] = MMS_BUSY;
+assign DEBUG_PIN[13] = MMS_CBRQ;
+assign DEBUG_PIN[14] = MMS_BPRN;
+assign DEBUG_PIN[15] = MMS_IOWC;
+//assign DEBUG_PIN[15:8] = ~MMS_ADR[7:0];//spi_reg_in[39:32];//~MMS_DATA[7:0];
 
 endmodule

@@ -24,8 +24,9 @@ typedef volatile struct mms16_master_out_t
 typedef volatile struct mms16_master_in_t
 {
     uint32_t data : 16; // W0
-    uint32_t time : 10;
-    uint32_t f1   : 6;
+    uint32_t timeh : 8;
+    uint32_t f5 : 6;
+    uint32_t timel : 2;
 } mms16_master_in;
 
         /*
@@ -44,22 +45,23 @@ static spi_dev_t *const SPI_HW = &GPSPI2;
 
 void run_spi()
 {
-    while (!gpio_get_level(PIN_IDLE)) gpio_set_level(PIN_START,0);
+    gpio_set_level(PIN_START,1);
+    while (!gpio_get_level(PIN_IDLE));
     SPI_HW->misc.cs0_dis = 0;
     SPI_HW->misc.cs1_dis = 1;
     SPI_HW->ms_dlen.ms_data_bitlen = 47;
     SPI_HW->cmd.update = 1;
     SPI_HW->cmd.usr = 1;
     while (SPI_HW->cmd.usr);
-    gpio_set_level(PIN_START,1);
+    gpio_set_level(PIN_START,0);
     while (!gpio_get_level(PIN_DONE));
-    gpio_set_level(PIN_START,1);
     SPI_HW->misc.cs0_dis = 1;
     SPI_HW->misc.cs1_dis = 0;
-    SPI_HW->ms_dlen.ms_data_bitlen = 23;
+    SPI_HW->ms_dlen.ms_data_bitlen = 31;
     SPI_HW->cmd.update = 1;
     SPI_HW->cmd.usr = 1;
     while (SPI_HW->cmd.usr);
+    gpio_set_level(PIN_START,1);
 }
 
 int16_t readMemByte(uint32_t addr, uint8_t* val)
@@ -73,7 +75,7 @@ int16_t readMemByte(uint32_t addr, uint8_t* val)
     packet_out->data = 0;
     run_spi();
     *val = packet_in->data & 0xff;
-    return (packet_in->time == 1023) ? -1 : packet_in->time;
+    return (packet_in->timeh == 255 && packet_in->timel == 3) ? -1 : packet_in->timel | packet_in->timeh<<2;
 }
 
 int16_t readMemWord(uint32_t addr, uint16_t* val)
@@ -87,7 +89,7 @@ int16_t readMemWord(uint32_t addr, uint16_t* val)
     packet_out->data = 0;
     run_spi();
     *val = packet_in->data;
-    return (packet_in->time == 1023) ? -1 : packet_in->time;
+    return (packet_in->timeh == 255 && packet_in->timel == 3) ? -1 : packet_in->timel | packet_in->timeh<<2;
 }
 
 int16_t writeMemByte(uint32_t addr, uint8_t val)
@@ -100,7 +102,7 @@ int16_t writeMemByte(uint32_t addr, uint8_t val)
     packet_out->addr = addr;
     packet_out->data = val;
     run_spi();
-    return (packet_in->time == 1023) ? -1 : packet_in->time;
+    return (packet_in->timeh == 255 && packet_in->timel == 3) ? -1 : packet_in->timel | packet_in->timeh<<2;
 }
 
 int16_t writeMemWord(uint32_t addr, uint16_t val)
@@ -113,7 +115,7 @@ int16_t writeMemWord(uint32_t addr, uint16_t val)
     packet_out->addr = addr & 0xfffffe;
     packet_out->data = val;
     run_spi();
-    return (packet_in->time == 1023) ? -1 : packet_in->time;
+    return (packet_in->timeh == 255 && packet_in->timel == 3) ? -1 : packet_in->timel | packet_in->timeh<<2;
 }
 
 int16_t readIoByte(uint32_t addr, uint8_t* val)
@@ -127,7 +129,7 @@ int16_t readIoByte(uint32_t addr, uint8_t* val)
     packet_out->data = 0;
     run_spi();
     *val = packet_in->data & 0xff;
-    return (packet_in->time == 1023) ? -1 : packet_in->time;
+    return (packet_in->timeh == 255 && packet_in->timel == 3) ? -1 : packet_in->timel | packet_in->timeh<<2;
 }
 
 int16_t readIoWord(uint32_t addr, uint16_t* val)
@@ -141,7 +143,7 @@ int16_t readIoWord(uint32_t addr, uint16_t* val)
     packet_out->data = 0;
     run_spi();
     *val = packet_in->data;
-    return (packet_in->time == 1023) ? -1 : packet_in->time;
+    return (packet_in->timeh == 255 && packet_in->timel == 3) ? -1 : packet_in->timel | packet_in->timeh<<2;
 }
 
 int16_t writeIoByte(uint32_t addr, uint8_t val)
@@ -154,7 +156,7 @@ int16_t writeIoByte(uint32_t addr, uint8_t val)
     packet_out->addr = addr;
     packet_out->data = val;
     run_spi();
-    return (packet_in->time == 1023) ? -1 : packet_in->time;
+    return (packet_in->timeh == 255 && packet_in->timel == 3) ? -1 : packet_in->timel | packet_in->timeh<<2;
 }
 
 int16_t writeIoWord(uint32_t addr, uint16_t val)
@@ -167,7 +169,7 @@ int16_t writeIoWord(uint32_t addr, uint16_t val)
     packet_out->addr = addr & 0xfffffe;
     packet_out->data = val;
     run_spi();
-    return (packet_in->time == 1023) ? -1 : packet_in->time;
+    return (packet_in->timeh == 255 && packet_in->timel == 3) ? -1 : packet_in->timel | packet_in->timeh<<2;
 }
 
 void setup_spi()
@@ -181,7 +183,7 @@ void setup_spi()
     pincfg.mode = GPIO_MODE_INPUT;
     pincfg.pin_bit_mask = 1ULL<<PIN_DONE | 1ULL<<PIN_IDLE;
     ESP_ERROR_CHECK(gpio_config(&pincfg));
-    gpio_set_level(PIN_START,0);
+    gpio_set_level(PIN_START,1);
 
     SYSTEM.perip_clk_en0.spi2_clk_en = 1;
     SYSTEM.perip_rst_en0.spi2_rst = 0;
