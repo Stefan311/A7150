@@ -89,7 +89,7 @@ Chan2_2:        ld      a,(CH2_AMB2_I)
 Chan2_3:        ld      a,(CH2_AMB3_I)
                 or      a,a
                 jp      z,Ch2_End_N
-                ld      iy,(CH2_AMB2_A)
+                ld      iy,(CH2_AMB3_A)
                 out     (REG_HOSTSEL),a
                 ld      (CH2_CMB_I),a
                 ld      a,(iy+0)

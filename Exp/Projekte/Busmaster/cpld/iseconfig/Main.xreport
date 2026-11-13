@@ -1,11 +1,11 @@
 <?xml version='1.0' encoding='UTF-8'?>
 <report-views version="2.0" >
  <header>
-  <DateModified>2026-05-20T19:06:01</DateModified>
+  <DateModified>2026-09-06T11:21:51</DateModified>
   <ModuleName>Main</ModuleName>
   <SummaryTimeStamp>2026-04-07T21:50:16</SummaryTimeStamp>
-  <SavedFilePath>/home/stefan/cm1910/exp/cplds/Busmaster/iseconfig/Main.xreport</SavedFilePath>
-  <ImplementationReportsDirectory>/home/stefan/cm1910/exp/cplds/Busmaster/</ImplementationReportsDirectory>
+  <SavedFilePath>/home/stefan/cm1910/git/A7150/Exp/Projekte/Busmaster/cpld/iseconfig/Main.xreport</SavedFilePath>
+  <ImplementationReportsDirectory>/home/stefan/cm1910/git/A7150/Exp/Projekte/Busmaster/cpld/</ImplementationReportsDirectory>
   <DateInitialized>2026-04-07T19:17:49</DateInitialized>
   <EnableMessageFiltering>false</EnableMessageFiltering>
  </header>

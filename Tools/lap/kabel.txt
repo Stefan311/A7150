@@ -1,0 +1,17 @@
+A71x0-Seite                 PC-Seite
+Sub-D25 Female          Sub-D25 Male
+Signal      PIN         PIN     Signal
+--------------------------------------
+D0      -   2           15  -   -ERROR
+D1      -   3           13  -   SEL
+D2      -   4           12  -   POUT
+D3      -   5           10  -   -ACK
+D4      -   6           11  -   BUSY
+-ERROR  -   15          2   -   D0
+SEL     -   13          3   -   D1
+POUT    -   12          4   -   D2
+-ACK    -   10          5   -   D3
+BUSY    -   11          6   -   D4
+GND     -   24          24  -   GND
+GND     -   25          25  -   GND
+SHIELD  -                   -   SHIELD
